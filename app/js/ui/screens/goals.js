@@ -26,14 +26,14 @@ function goalCard(ctx, g) {
 
   const plan = missing === 0 ? null
     : planned > 0
-      ? (gapAfter > 0 ? `Com os aportes planejados, ainda faltam ${formatBRL(gapAfter)}.` : 'Os aportes planejados completam a meta.')
-      : days > 0 ? `Sem aportes planejados. Seriam ${formatBRL(Math.ceil(missing / Math.max(1, Math.ceil(days / 30))))} por mês.` : null;
+      ? (gapAfter > 0 ? `Com os aportes planejados, ainda faltam ${formatBRL(gapAfter)}.` : null)
+      : days > 0 ? `Seriam ${formatBRL(Math.ceil(missing / Math.max(1, Math.ceil(days / 30))))} por mês até lá.` : null;
 
   return h('section', { class: 'card' },
     h('div', { class: 'card-head' },
       h('div', { class: 'li-main' },
         h('h2', { class: 'card-title' }, g.name),
-        h('span', { class: 'li-sub' }, `Até ${formatDayMonth(g.deadline, year)} · ${acc?.name ?? '—'}`)),
+        h('span', { class: 'li-sub' }, `Até ${formatDayMonth(g.deadline, year)}`)),
       h('button', { class: 'icon-btn', 'aria-label': `Editar meta ${g.name}`, onclick: () => editGoal(g) }, icon('edit', { size: 20 }))),
     h('div', { class: 'row between', style: 'align-items:baseline' },
       h('span', { class: 'stat-value' }, formatBRL(saved)),
@@ -52,8 +52,8 @@ function goalCard(ctx, g) {
           : pendingKeys.has(`contribution:${c.id}`) ? h('span', { class: 'badge warn' }, 'Confirmar') : null;
         return h('li', {}, h('button', { class: 'list-item', onclick: () => editContribution(c) },
           h('span', { class: 'li-main' },
-            h('span', { class: 'row gap-sm' }, h('span', { class: 'li-title' }, `Aporte · ${formatDayMonth(c.date, year)}`), st),
-            h('span', { class: 'li-sub' }, done ? `Saiu de ${store.getAccount(c.fromAccountId)?.name ?? '—'}` : relative(today, c.date))),
+            h('span', { class: 'row gap-sm' }, h('span', { class: 'li-title' }, `Aporte em ${formatDayMonth(c.date, year)}`), st),
+            h('span', { class: 'li-sub' }, done ? `Saiu de ${store.getAccount(c.fromAccountId)?.name ?? 'conta excluída'}` : relative(today, c.date))),
           h('span', { class: 'li-end' }, h('span', { class: 'li-value' }, formatBRLShort(c.amount)), icon('chevron', { size: 18, cls: 'chev' }))));
       })),
       addButton('Planejar aporte', () => editContribution(null, g.id))));
@@ -62,9 +62,7 @@ function goalCard(ctx, g) {
 export function renderGoals(ctx) {
   const goals = [...ctx.state.goals].sort((a, b) => (a.deadline < b.deadline ? -1 : 1));
   return h('div', { class: 'screen goals' },
-    h('header', { class: 'screen-head' },
-      h('h1', {}, 'Metas'),
-      h('p', { class: 'sub' }, 'Dinheiro guardado fora do orçamento')),
+    h('header', { class: 'screen-head' }, h('h1', {}, 'Metas')),
     goals.length
       ? goals.map((g) => goalCard(ctx, g))
       : h('section', { class: 'card' },

@@ -42,10 +42,13 @@ export function getState() {
 }
 
 export function load() {
+  let raw = null;
   try {
-    const raw = localStorage.getItem(KEY);
+    raw = localStorage.getItem(KEY);
     state = raw ? normalize(JSON.parse(raw)) : emptyState();
   } catch {
+    // Nunca sobrescreve dados que não conseguiu ler: guarda uma cópia antes
+    try { if (raw) localStorage.setItem(`${KEY}:ilegivel:${Date.now()}`, raw); } catch { /* sem espaço */ }
     state = emptyState();
   }
   return state;
@@ -93,9 +96,15 @@ export function exportJSON() {
 export function importJSON(text) {
   const data = JSON.parse(text);
   if (data.app && data.app !== 'hoje') throw new Error('Este arquivo não é um backup do Hoje');
-  delete data.app;
-  delete data.exportedAt;
-  const next = normalize(data);
+  replaceState(data);
+}
+
+/** Troca todos os dados (backup de arquivo ou da nuvem). */
+export function replaceState(data) {
+  const copy = { ...data };
+  delete copy.app;
+  delete copy.exportedAt;
+  const next = normalize(copy);
   next.setupDone = next.setupDone || next.accounts.length > 0;
   commit(() => { state = next; });
 }

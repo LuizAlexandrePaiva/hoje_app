@@ -85,7 +85,7 @@ export function closeSheet(fromPop = false) {
   if (!fromPop && history.state?.sheet) history.back();
 }
 
-/** Fecha a folha aberta (se houver) e só então executa fn — evita corrida com history.back(). */
+/** Fecha a folha aberta (se houver) e só então executa fn, evitando corrida com history.back(). */
 export function afterSheetClosed(fn) {
   if (openSheet && history.state?.sheet) {
     window.addEventListener('popstate', () => setTimeout(fn), { once: true });

@@ -1,4 +1,4 @@
-/* Hoje — somente tema escuro, mobile-first, uso com uma mão. */
+/* Hoje: somente tema escuro, mobile-first, uso com uma mão. */
 :root {
   color-scheme: dark;
   /* superfícies */
@@ -60,15 +60,15 @@ button { font: inherit; color: inherit; }
   padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(var(--tab-h) + var(--safe-b) + 32px);
 }
 body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
-.screen { display: flex; flex-direction: column; gap: 12px; }
-.screen-head { display: flex; flex-direction: column; gap: 2px; padding: 4px 4px 8px; }
+.screen { display: flex; flex-direction: column; gap: 16px; }
+.screen-head { display: flex; flex-direction: column; gap: 4px; padding: 8px 4px 4px; }
 .screen-head h1 { font-size: var(--fs-h1); font-weight: 750; letter-spacing: -.01em; line-height: 1.15; }
 .screen-head .sub { color: var(--muted); font-size: var(--fs-small); }
 .screen-head .sub::first-letter { text-transform: uppercase; }
 
 .section-label {
   font-size: var(--fs-caption); font-weight: 650; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--muted); padding: 16px 4px 0;
+  color: var(--muted); padding: 12px 4px 0; margin-bottom: -6px;
 }
 
 .muted { color: var(--muted); }
@@ -91,14 +91,14 @@ body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
 .card {
   background: var(--surface);
   border-radius: var(--r-card);
-  padding: 16px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 .card-title { font-size: var(--fs-title); font-weight: 650; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
-.card.flush { padding: 4px 16px; gap: 0; }
+.card.flush { padding: 2px 18px; gap: 0; }
 
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -121,7 +121,7 @@ body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
 .hero {
   background: radial-gradient(120% 90% at 0% 0%, #17322a 0%, var(--surface) 62%);
   border-radius: 24px;
-  padding: 22px 20px 18px;
+  padding: 26px 22px 22px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -411,3 +411,15 @@ body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
 .setup-nav.column { flex-direction: column; gap: 4px; }
 .setup-nav .btn.primary { flex: 2; }
 .setup-nav .btn:not(.primary) { flex: 1; }
+
+/* ---------- backup ---------- */
+.code-box {
+  display: grid; grid-template-columns: repeat(3, auto); justify-content: center; gap: 6px 18px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 1.25rem; font-weight: 600; letter-spacing: .1em;
+  background: var(--surface-2); border-radius: 14px; padding: 16px 12px; user-select: all;
+}
+.code-input { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-transform: uppercase; letter-spacing: .06em; text-align: center; }
+.code-input::placeholder { text-transform: none; letter-spacing: .06em; }
+.sheet .features .ico { background: var(--pos-soft); }
+.features .li-sub, .features .li-title { white-space: normal; }

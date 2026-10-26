@@ -87,14 +87,15 @@ function chart(ctx, proj) {
   root.append(cross, dot1, dot2);
 
   const rDate = h('p', { class: 'readout-date' });
+  const rRel = h('span', { class: 'muted small' });
   const rV1 = h('span', { class: 'v' });
   const rV2 = h('span', { class: 'v' });
   const rEvents = h('p', { class: 'readout-events' });
   const readout = h('div', { class: 'readout', 'aria-live': 'polite' },
-    rDate,
+    h('div', { class: 'row between' }, rDate, rRel),
     h('div', { class: 'readout-rows' },
-      h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Só com as contas previstas'), rV1,
-      h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Gastando o limite diário'), rV2),
+      h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Sem gastos do dia'), rV1,
+      h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Gastando o limite'), rV2),
     rEvents);
 
   const select = (i) => {
@@ -102,11 +103,12 @@ function chart(ctx, proj) {
     for (const el of [cross]) { el.setAttribute('x1', x(i)); el.setAttribute('x2', x(i)); }
     dot1.setAttribute('cx', x(i)); dot1.setAttribute('cy', y(p.events));
     dot2.setAttribute('cx', x(i)); dot2.setAttribute('cy', y(p.spending));
-    rDate.textContent = `${formatLong(p.date)} · ${relative(ctx.today, p.date)}`;
+    rDate.textContent = formatLong(p.date);
+    rRel.textContent = relative(ctx.today, p.date);
     rV1.textContent = formatBRL(p.events);
     rV2.textContent = formatBRL(p.spending);
     rV2.classList.toggle('neg', p.spending < 0);
-    rEvents.textContent = p.dayEvents.map((e) => `${e.kind === 'income' ? '▲' : '▼'} ${e.name} ${formatBRLShort(e.amount)}`).join('   ');
+    rEvents.textContent = p.dayEvents.map((e) => `${e.kind === 'income' ? '▲' : '▼'} ${e.name} ${formatBRLShort(e.amount)}`).join('    ');
   };
   const pick = (clientX) => {
     const r = root.getBoundingClientRect();
@@ -134,16 +136,19 @@ function eventList(ctx, proj) {
     groups.get(e.effectiveDate).push(e);
   }
   if (!groups.size) return h('p', { class: 'empty' }, 'Nada previsto para o período.');
-  const accName = (id) => store.getAccount(id)?.name ?? '—';
+  const def = ctx.state.settings.defaultAccountId;
+  const accName = (id) => store.getAccount(id)?.name ?? 'conta excluída';
+  // conta só aparece quando não é a padrão; atraso sempre aparece
   const sub = (e) => {
-    const where = e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
-    return e.overdue ? `${where} · atrasado desde ${formatShort(e.date)}` : where;
+    if (e.overdue) return `Atrasado, previsto para ${formatShort(e.date)}`;
+    if (e.accountId === def) return null;
+    return e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
   };
   return h('div', {}, [...groups].map(([date, evs]) => h('div', { class: 'day-group' },
     h('div', { class: 'day-head' }, h('strong', {}, formatLong(date)), h('span', { class: 'muted' }, relative(ctx.today, date))),
     evs.map((e) => h('div', { class: 'ev' },
       h('span', { class: `ev-dot ${e.kind === 'income' ? 'in' : 'out'}` }),
-      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), h('span', { class: 'li-sub' }, sub(e))),
+      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: 'li-sub' }, sub(e))),
       h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` },
         `${e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)}`))))));
 }
@@ -154,12 +159,11 @@ export function renderTimeline(ctx) {
   return h('div', { class: 'screen timeline' },
     h('header', { class: 'screen-head' },
       h('h1', {}, 'Linha do tempo'),
-      h('p', { class: 'sub' }, `Saldo das contas de gasto até ${formatShort(proj.end)}`)),
+      h('p', { class: 'sub' }, 'Toque no gráfico para ver cada dia')),
     h('section', { class: 'card' },
       c.readout,
       c.chart,
-      legend(),
-      h('p', { class: 'caption' }, 'Toque e arraste no gráfico para ver cada dia.')),
+      legend()),
     h('h2', { class: 'section-label' }, 'Próximos eventos'),
     h('section', { class: 'card flush' }, eventList(ctx, proj)));
 }

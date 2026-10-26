@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { expandOccurrences, openEvents, pendingConfirmations } from '../js/core/schedule.js';
+import { expandOccurrences, openEvents, pendingConfirmations } from '../app/js/core/schedule.js';
 import { TODAY, scenario } from './fixtures.js';
 
 test('fatura anterior ao cadastro é ignorada; a de novembro aparece', () => {

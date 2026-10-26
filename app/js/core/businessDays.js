@@ -47,7 +47,7 @@ export function isBusinessDay(s, { countSaturday = false } = {}) {
 /**
  * N-ésimo dia útil do mês (m = 1..12).
  * Com countSaturday, sábados contam na contagem, mas se o dia resultante cair
- * num sábado o pagamento é antecipado para o dia útil (seg–sex) anterior.
+ * num sábado o pagamento é antecipado para o dia útil (segunda a sexta) anterior.
  */
 export function nthBusinessDay(y, m, n, { countSaturday = false } = {}) {
   const last = daysInMonth(y, m);

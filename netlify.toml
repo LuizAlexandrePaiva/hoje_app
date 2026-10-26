@@ -1,6 +1,14 @@
-# Site estático, sem build: o Netlify publica a pasta raiz como está.
+# O app é estático (pasta app/, sem build). A única parte no servidor é a
+# função /api/sync, que guarda o backup cifrado no Netlify Blobs.
 [build]
-  publish = "."
+  publish = "app"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
 
 # O service worker precisa ser revalidado sempre para as atualizações chegarem.
 [[headers]]

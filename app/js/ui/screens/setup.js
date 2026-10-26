@@ -6,6 +6,7 @@ import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { accountsList, incomesList, expensesList, goalsList, contributionsList } from '../editors.js';
 import { refillSettings, importButton } from './settings.js';
+import { backupStepCard, restoreSheet } from '../backup.js';
 
 const tip = (text) => h('p', { class: 'tip' }, icon('check', { size: 18 }), h('span', {}, text));
 
@@ -40,6 +41,11 @@ const STEPS = [
     title: 'Resgates',
     lead: 'De onde saem os gastos e de onde vem o dinheiro quando a conta baixar.',
     render: (s) => [refillSettings(s)],
+  },
+  {
+    title: 'Backup',
+    lead: 'Para não perder nada no Safari, no app instalado ou num celular novo.',
+    render: () => [backupStepCard()],
     next: 'Concluir',
   },
 ];
@@ -55,7 +61,7 @@ function welcome() {
     h('ul', { class: 'features card' },
       feature('sun', 'Limite do dia', 'Recalculado todo dia com o saldo real.'),
       feature('transfer', 'Hora de resgatar', 'Avisa quando a conta precisa de reforço.'),
-      feature('wallet', 'Só no seu aparelho', 'Funciona offline. Nada vai para servidores.')),
+      feature('wallet', 'Privado', 'Funciona offline. Backup só com criptografia.')),
   ];
 }
 
@@ -88,7 +94,7 @@ export function renderSetup(ctx) {
     step === 0
       ? h('div', { class: 'setup-nav column' },
         h('button', { class: 'btn primary xl', onclick: next }, cur.next),
-        importButton('Já tenho um backup', 'btn quiet', false))
+        h('button', { class: 'btn quiet', onclick: () => restoreSheet({ fileButton: importButton('Usar arquivo JSON', 'btn quiet block', false) }) }, 'Já tenho um backup'))
       : h('div', { class: 'setup-nav' },
         h('button', { class: 'btn', onclick: () => store.setSetupStep(step - 1) }, 'Voltar'),
         h('button', { class: 'btn primary', onclick: next }, cur.next || 'Continuar')));

@@ -1,9 +1,10 @@
-import { h, toast, confirmDialog } from '../dom.js';
+import { h, toast, confirmDialog, closeSheet } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { todayISO } from '../../core/dates.js';
 import { accountsList, incomesList, expensesList, goalsList, contributionsList, field, inlineField, switchRow } from '../editors.js';
 import { APP_VERSION } from '../../version.js';
+import { cloudCard } from '../backup.js';
 
 export function refillSettings(state) {
   const s = state.settings;
@@ -66,22 +67,19 @@ export function importButton(label, cls = 'btn grow', confirmFirst = true) {
     if (confirmFirst && !(await confirmDialog('Importar backup?', 'Os dados deste aparelho serão trocados pelos do arquivo.', 'Importar', true))) return;
     try {
       store.importJSON(await file.text());
+      closeSheet();
       toast('Backup importado');
     } catch (e) {
       toast(`Não deu para importar: ${e.message}`);
     }
   });
-  return [h('button', { class: cls, onclick: () => input.click() }, icon('upload', { size: 18 }), label), input];
+  return [h('button', { type: 'button', class: cls, onclick: () => input.click() }, icon('upload', { size: 18 }), label), input];
 }
 
-function backupCard() {
-  return h('section', { class: 'card' },
-    h('div', {},
-      h('h3', { class: 'card-title' }, 'Backup'),
-      h('p', { class: 'small muted' }, 'Seus dados ficam só neste aparelho. Exporte de vez em quando.')),
-    h('div', { class: 'row gap' },
-      h('button', { class: 'btn grow', onclick: exportBackup }, icon('download', { size: 18 }), 'Exportar'),
-      importButton('Importar')));
+function fileCard() {
+  return h('section', { class: 'card flush' },
+    h('button', { class: 'btn-add', onclick: exportBackup }, icon('download', { size: 18 }), 'Exportar arquivo JSON'),
+    importButton('Importar arquivo JSON', 'btn-add'));
 }
 
 function dangerCard() {
@@ -108,7 +106,8 @@ export function renderSettings(ctx) {
     h('h2', { class: 'section-label' }, 'Resgates'),
     refillSettings(state),
     h('h2', { class: 'section-label' }, 'Dados'),
-    backupCard(),
+    cloudCard(),
+    fileCard(),
     dangerCard(),
     h('p', { class: 'caption center', style: 'padding-top:8px' }, `Hoje ${APP_VERSION}`));
 }

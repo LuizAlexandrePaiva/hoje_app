@@ -1,4 +1,4 @@
-// Orçamento diário dinâmico — função pura, sem DOM e sem armazenamento.
+// Orçamento diário dinâmico: função pura, sem DOM e sem armazenamento.
 
 import { addDays, diffDays } from './dates.js';
 import { openEvents, flowInto } from './schedule.js';

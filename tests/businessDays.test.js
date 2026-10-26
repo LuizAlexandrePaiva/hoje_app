@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { easter, nationalHolidays, isBusinessDay, nthBusinessDay } from '../js/core/businessDays.js';
-import { addDays, diffDays, weekday, todayISO } from '../js/core/dates.js';
+import { easter, nationalHolidays, isBusinessDay, nthBusinessDay } from '../app/js/core/businessDays.js';
+import { addDays, diffDays, weekday, todayISO } from '../app/js/core/dates.js';
 
 test('Páscoa em anos conhecidos', () => {
   assert.equal(easter(2024), '2024-03-31');
@@ -66,7 +66,7 @@ test('aritmética de datas sem bugs de fuso', () => {
 });
 
 test('formatação de datas em pt-BR', async () => {
-  const { formatShort, formatFull, formatLong, formatHeader, formatDayMonth } = await import('../js/core/dates.js');
+  const { formatShort, formatFull, formatLong, formatHeader, formatDayMonth } = await import('../app/js/core/dates.js');
   assert.equal(formatShort('2026-11-09'), '09/11');
   assert.equal(formatFull('2026-11-27'), '27/11/2026');
   assert.equal(formatLong('2026-11-09'), 'seg, 9 de nov');

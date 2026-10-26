@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeDailyBudget, nextSalary } from '../js/core/budget.js';
-import { applyTransaction } from '../js/data/ledger.js';
+import { computeDailyBudget, nextSalary } from '../app/js/core/budget.js';
+import { applyTransaction } from '../app/js/data/ledger.js';
 import { TODAY, scenario } from './fixtures.js';
 
 const spend = (s, amount, date = TODAY, from = 'cc') =>
@@ -132,7 +132,7 @@ test('sem salário cadastrado usa a próxima receita; sem receitas, 30 dias', ()
 });
 
 test('projeção: arredondamento do orçamento não vira saldo negativo', async () => {
-  const { projectBalance } = await import('../js/core/projection.js');
+  const { projectBalance } = await import('../app/js/core/projection.js');
   const s = scenario();
   const b = computeDailyBudget(s, TODAY);
   const p = projectBalance(s, TODAY, b).points.find((x) => x.date === b.horizonEnd);

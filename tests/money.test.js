@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseBRL, toInput, formatBRL, ceilTo } from '../js/core/money.js';
+import { parseBRL, toInput, formatBRL, ceilTo } from '../app/js/core/money.js';
 
 test('parseBRL entende o formato brasileiro', () => {
   assert.equal(parseBRL('79'), 7900);

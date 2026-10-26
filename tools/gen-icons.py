@@ -37,7 +37,7 @@ def draw(size, maskable=False):
 
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "icons"))
+ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "app" / "icons"))
 args = ap.parse_args()
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,7 @@
 // Service worker: cache-first para os arquivos do app (funciona 100% offline
 // depois da primeira visita). Ao publicar mudanças, aumente CACHE_VERSION.
 
-const CACHE_VERSION = '1.2.0';
+const CACHE_VERSION = '1.3.0';
 const CACHE = `hoje-${CACHE_VERSION}`;
 
 const APP_FILES = [
@@ -25,6 +25,9 @@ const APP_FILES = [
   './js/core/projection.js',
   './js/data/ledger.js',
   './js/data/store.js',
+  './js/data/sync.js',
+  './js/core/vault.js',
+  './js/ui/backup.js',
   './js/ui/dom.js',
   './js/ui/icons.js',
   './js/ui/editors.js',
@@ -53,7 +56,9 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  // a API do backup nunca passa pelo cache
+  if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     // Navegação (abrir o app): sempre o index.html do cache

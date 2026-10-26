@@ -2,7 +2,9 @@ import * as store from './data/store.js';
 import { todayISO } from './core/dates.js';
 import { computeDailyBudget } from './core/budget.js';
 import { suggestRefill, suggestSurplus } from './core/refill.js';
-import { afterSheetClosed } from './ui/dom.js';
+import { afterSheetClosed, toast } from './ui/dom.js';
+import * as sync from './data/sync.js';
+import { conflictSheet } from './ui/backup.js';
 import { iconSVG } from './ui/icons.js';
 import { renderToday } from './ui/screens/today.js';
 import { renderSpend } from './ui/screens/spend.js';
@@ -81,6 +83,9 @@ for (const a of tabbar.querySelectorAll('a[data-icon]')) a.insertAdjacentHTML('a
 
 store.load();
 store.subscribe(render);
+sync.init({ onConflict: conflictSheet, onRemoteApplied: () => toast('Dados atualizados da nuvem') });
+// telas que mostram o estado do backup
+sync.onStatus(() => { if (['#/ajustes', '#/setup'].includes(main.dataset.route)) render(); });
 window.addEventListener('hashchange', render);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDay(); });
 setInterval(checkDay, 60 * 1000);

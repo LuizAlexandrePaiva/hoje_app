@@ -49,7 +49,7 @@ export function switchRow(title, sub, checked) {
   return { el, input };
 }
 
-/** Controle segmentado (2–3 opções). */
+/** Controle segmentado (2 ou 3 opções). */
 function segmented(options, value, onChange) {
   let current = value;
   const buttons = options.map(([v, label]) => h('button', {
@@ -387,7 +387,7 @@ export function confirmOccurrenceSheet(event) {
     close();
     toast(`${event.name}: ${formatBRL(v)} registrado`);
   },
-  h('p', { class: 'sheet-lead' }, `Previsto para ${formatShort(event.date)} · ${cfg.where} ${acc?.name ?? '—'}. Ajuste se veio diferente.`),
+  h('p', { class: 'sheet-lead' }, `Previsto para ${formatShort(event.date)}. ${cfg.where} ${acc?.name ?? 'conta excluída'}.`),
   h('div', { class: 'field-row' }, field('Valor', amount), field('Data', date)),
   err,
   h('div', { class: 'form-actions' },
@@ -422,28 +422,28 @@ export function listItem(main, sub, value, onclick, badge) {
         icon('chevron', { size: 18, cls: 'chev' }))));
 }
 
-const accName = (state, id) => state.accounts.find((a) => a.id === id)?.name ?? '—';
+const accName = (state, id) => state.accounts.find((a) => a.id === id)?.name ?? 'conta excluída';
+// a conta só é citada quando não é a padrão dos gastos
+const withAccount = (state, text, id) => (id === state.settings.defaultAccountId ? text : `${text}, ${accName(state, id)}`);
 
 export function accountsList(state, title = 'Contas') {
   const role = (a) => (a.id === state.settings.defaultAccountId ? 'Padrão dos gastos'
-    : a.id === state.settings.reserveAccountId ? 'Reserva' : null);
+    : a.id === state.settings.reserveAccountId ? 'Reserva' : a.kind === 'goal' ? 'De meta' : 'De gasto');
   return listCard(title,
-    state.accounts.map((a) => listItem(a.name,
-      [a.kind === 'goal' ? 'De meta' : 'De gasto', role(a)].filter(Boolean).join(' · '),
-      formatBRL(a.balance), () => editAccount(a))),
+    state.accounts.map((a) => listItem(a.name, role(a), formatBRL(a.balance), () => editAccount(a))),
     'Nenhuma conta ainda.', () => editAccount(), 'Adicionar conta');
 }
 
 export function incomesList(state, title = 'Receitas') {
   return listCard(title,
-    state.incomes.map((i) => listItem(i.name, `${describeRule(i.rule)} · ${accName(state, i.accountId)}`,
+    state.incomes.map((i) => listItem(i.name, withAccount(state, describeRule(i.rule), i.accountId),
       formatBRLShort(i.amount), () => editIncome(i), i.isSalary && h('span', { class: 'badge pos' }, 'Salário'))),
     'Nenhuma receita ainda.', () => editIncome(), 'Adicionar receita');
 }
 
 export function expensesList(state, title = 'Despesas fixas') {
   return listCard(title,
-    state.expenses.map((e) => listItem(e.name, `Dia ${e.day} · ${accName(state, e.accountId)}`, formatBRLShort(e.amount), () => editExpense(e))),
+    state.expenses.map((e) => listItem(e.name, withAccount(state, `Dia ${e.day}`, e.accountId), formatBRLShort(e.amount), () => editExpense(e))),
     'Nenhuma despesa fixa.', () => editExpense(), 'Adicionar despesa');
 }
 
@@ -459,7 +459,7 @@ export function contributionsList(state, title = 'Aportes planejados') {
   const year = Number(todayISO().slice(0, 4));
   const sorted = [...state.contributions].sort((a, b) => (a.date < b.date ? -1 : 1));
   return listCard(title,
-    sorted.map((c) => listItem(goals.get(c.goalId)?.name ?? '—', formatDayMonth(c.date, year), formatBRLShort(c.amount), () => editContribution(c))),
+    sorted.map((c) => listItem(goals.get(c.goalId)?.name ?? 'Meta excluída', formatDayMonth(c.date, year), formatBRLShort(c.amount), () => editContribution(c))),
     state.goals.length ? 'Nenhum aporte planejado.' : 'Crie uma meta para planejar aportes.',
     () => (state.goals.length ? pickGoalThenContribution(state) : toast('Crie uma meta antes.')), 'Planejar aporte');
 }

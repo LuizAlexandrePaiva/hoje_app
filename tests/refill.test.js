@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeDailyBudget } from '../js/core/budget.js';
-import { coverageDays, suggestRefill, suggestSurplus } from '../js/core/refill.js';
-import { applyTransaction } from '../js/data/ledger.js';
+import { computeDailyBudget } from '../app/js/core/budget.js';
+import { coverageDays, suggestRefill, suggestSurplus } from '../app/js/core/refill.js';
+import { applyTransaction } from '../app/js/data/ledger.js';
 import { TODAY, scenario } from './fixtures.js';
 
 const run = (s, today = TODAY) => {
