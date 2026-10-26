@@ -1,13 +1,9 @@
-import { h, sheet, toast, confirmDialog } from '../dom.js';
+import { h, sheet } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL } from '../../core/money.js';
 import { formatShort } from '../../core/dates.js';
-import { adjustSheet, transferSheet, addButton, editAccount, listItem } from '../editors.js';
-
-const TYPE_LABEL = {
-  spend: 'Gasto', transfer: 'Transferência', adjust: 'Ajuste de saldo', income: 'Receita', expense: 'Despesa fixa', contribution: 'Aporte',
-};
+import { adjustSheet, transferSheet, addButton, editAccount, listItem, transactionSheet, TX_LABEL } from '../editors.js';
 
 const HISTORY_LIMIT = 40;
 
@@ -40,23 +36,6 @@ function accountList(ctx, accounts) {
       h('span', { class: a.balance < 0 ? 'neg' : '' }, formatBRL(a.balance)), () => accountSheet(ctx, a)))));
 }
 
-function txSheet(t, title, detail) {
-  sheet(title, (close) => [
-    h('p', { class: 'sheet-lead' }, detail),
-    h('div', { class: 'form-actions' },
-      h('button', { class: 'btn grow', onclick: close }, 'Fechar'),
-      h('button', {
-        class: 'btn danger grow',
-        onclick: async () => {
-          if (await confirmDialog('Excluir movimentação?', 'Os saldos voltam ao que eram antes dela.', 'Excluir', true)) {
-            store.deleteTransaction(t.id);
-            toast('Movimentação excluída');
-          }
-        },
-      }, 'Excluir')),
-  ]);
-}
-
 function history(ctx) {
   const txs = [...ctx.state.transactions].reverse().slice(0, HISTORY_LIMIT);
   if (!txs.length) return null;
@@ -67,9 +46,9 @@ function history(ctx) {
       const isMove = t.type === 'transfer' || t.type === 'contribution';
       const credit = t.type === 'adjust' ? t.amount > 0 : !!t.to && !t.from;
       const value = isMove ? formatBRL(t.amount) : `${credit ? '+' : '−'}${formatBRL(Math.abs(t.amount))}`;
-      const title = t.desc || TYPE_LABEL[t.type];
+      const title = t.desc || TX_LABEL[t.type];
       const sub = isMove ? `${formatShort(t.date)}, ${name(t.from)} → ${name(t.to)}` : formatShort(t.date);
-      return h('li', {}, h('button', { class: 'list-item', onclick: () => txSheet(t, title, `${value} em ${formatShort(t.date)}. ${isMove ? `${name(t.from)} → ${name(t.to)}` : name(t.from || t.to)}.`) },
+      return h('li', {}, h('button', { class: 'list-item', onclick: () => transactionSheet(t) },
         h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, title), h('span', { class: 'li-sub' }, sub)),
         h('span', { class: `li-value ${credit && !isMove ? 'pos' : ''}` }, value)));
     }))),

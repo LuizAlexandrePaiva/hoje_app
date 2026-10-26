@@ -172,6 +172,28 @@ export function skipOccurrence(event) {
   commit((s) => { s.settled[event.key] = { date: todayISO(), amount: 0, skipped: true }; });
 }
 
+export const NAME_MAX = 60;
+
+/** Dá ou troca o nome de um lançamento (vazio remove o nome). */
+export function renameTransaction(id, name) {
+  commit((s) => {
+    const t = s.transactions.find((x) => x.id === id);
+    if (t) t.desc = String(name || '').trim().slice(0, NAME_MAX);
+  });
+}
+
+/** Nomes de gastos mais recentes, sem repetir, para sugerir ao digitar. */
+export function recentSpendNames(limit = 20) {
+  const seen = new Set();
+  const out = [];
+  for (let i = state.transactions.length - 1; i >= 0 && out.length < limit; i--) {
+    const t = state.transactions[i];
+    const name = t.type === 'spend' && t.desc?.trim();
+    if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); out.push(name); }
+  }
+  return out;
+}
+
 export function deleteTransaction(id) {
   return commit((s) => revertTransaction(s, id));
 }

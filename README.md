@@ -11,7 +11,7 @@ PWA de finanças pessoais com orçamento diário dinâmico, offline e com backup
 </div>
 
 <p align="center">
-  <img src="docs/screenshots/hoje.png" alt="Tela Hoje com o limite do dia e a sugestão de resgate" width="22%">
+  <img src="docs/screenshots/hoje.png" alt="Tela Hoje com quanto resta para o dia e a sugestão de resgate" width="22%">
   <img src="docs/screenshots/novo-gasto.png" alt="Teclado numérico para lançar um gasto" width="22%">
   <img src="docs/screenshots/linha-do-tempo.png" alt="Gráfico do saldo projetado e próximos eventos" width="22%">
   <img src="docs/screenshots/metas.png" alt="Meta com progresso e aporte planejado" width="22%">
@@ -49,8 +49,8 @@ O app foi feito para uso com uma mão no celular: um número grande, um botão p
 
 ## Funcionalidades
 
-- **Limite do dia:** o valor que pode ser gasto hoje sem faltar dinheiro até a véspera do próximo salário. Gastos de hoje mostram o restante; no dia seguinte, sobras e excessos se redistribuem.
-- **Lançamento rápido:** teclado numérico, só o valor; descrição e conta são opcionais.
+- **Quanto resta hoje:** o número em destaque é o que ainda pode ser gasto hoje. Logo abaixo aparece o limite diário, calculado para não faltar dinheiro até a véspera do próximo salário. No dia seguinte, sobras e excessos se redistribuem.
+- **Lançamento rápido:** teclado numérico, só o valor; nome e conta são opcionais. O nome sugere os já usados e pode ser trocado depois, tocando no gasto.
 - **Resgates planejados:** mostra quantos dias o saldo da conta de gastos cobre e sugere quanto resgatar da reserva (por exemplo, um CDB de liquidez diária), arredondado e limitado ao saldo disponível. Também sugere aplicar o excedente quando sobra dinheiro.
 - **Receitas recorrentes:** dia fixo ou Nº dia útil do mês, com feriados nacionais (Sexta-feira Santa calculada pela Páscoa), opção de contar sábado e valor diferente em meses específicos.
 - **Confirmação de entradas e saídas:** receitas, contas e aportes só mexem no saldo quando você confirma. Dá para confirmar antes da data, mudar a data de uma ocorrência ou marcar que não aconteceu.
@@ -158,7 +158,7 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 56 testes com o executor nativo do Node, sem dependências externas.
+São 60 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|
@@ -167,6 +167,7 @@ São 56 testes com o executor nativo do Node, sem dependências externas.
 | `tests/businessDays.test.js` | Páscoa, feriados nacionais, Nº dia útil, regra do sábado e datas sem erro de fuso |
 | `tests/schedule.test.js` | Recorrências, pendências e ocorrências com data mudada |
 | `tests/money.test.js` | Leitura e formatação de valores em pt-BR |
+| `tests/store.test.js` | Nome e renomeação de gastos, sugestões de nomes |
 | `tests/vault.test.js` | Código de recuperação, derivação de chaves, cifra e adulteração |
 | `tests/sync-core.test.js` | API do backup: revisões, conflitos, corrida entre aparelhos e validação |
 

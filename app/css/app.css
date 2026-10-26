@@ -464,3 +464,6 @@ html, body, .main { overflow-x: clip; }
   .key { min-height: 50px; font-size: 1.45rem; }
   .spend .btn.xl { min-height: 52px; }
 }
+
+/* campo de nome com sugestões: sem a seta de lista (parece um seletor no Android) */
+input[list]::-webkit-calendar-picker-indicator { display: none !important; }

@@ -1,10 +1,10 @@
-import { h, toast, sheet } from '../dom.js';
+import { h } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
 import { formatHeader, formatShort, relative, addDays, TIME_ZONE } from '../../core/dates.js';
 import { openEvents, pendingConfirmations } from '../../core/schedule.js';
-import { confirmOccurrenceSheet, transferSheet, eventSheet } from '../editors.js';
+import { confirmOccurrenceSheet, transferSheet, eventSheet, transactionSheet } from '../editors.js';
 import { backupBanner } from '../backup.js';
 
 const ASK = { income: 'Recebeu?', expense: 'Pagou?', contribution: 'Aportou?' };
@@ -42,20 +42,19 @@ function pendingCard(ctx) {
 function hero(ctx) {
   const { dailyBudget, remainingToday, spentToday, horizonEnd, limitingDay } = ctx.budget;
   const pct = dailyBudget > 0 ? Math.min(100, Math.max(0, (spentToday / dailyBudget) * 100)) : 100;
-  const spent = spentToday > 0;
-  return h('section', { class: 'hero', 'aria-label': 'Orçamento de hoje' },
-    h('p', { class: 'hero-label' }, 'Você pode gastar hoje'),
-    h('p', { class: `hero-value ${dailyBudget < 0 ? 'neg' : ''}`, 'data-fit': true }, formatBRL(dailyBudget)),
-    h('p', { class: 'hero-meta' }, `Por dia, até ${formatShort(horizonEnd)}`),
-    spent && h('div', { class: 'meter', role: 'progressbar', 'aria-label': 'Quanto já gastou hoje', 'aria-valuenow': Math.round(pct), 'aria-valuemin': 0, 'aria-valuemax': 100 },
-      h('span', { style: `width:${pct}%`, class: remainingToday < 0 ? 'over' : '' })),
-    spent && h('div', { class: 'hero-foot' },
-      h('div', {}, h('p', { class: 'k' }, 'Gasto'), h('p', { class: 'v', 'data-fit': true }, formatBRL(spentToday))),
-      h('div', { style: 'text-align:right' },
-        h('p', { class: 'k' }, remainingToday < 0 ? 'Passou' : 'Restante'),
-        h('p', { class: `v ${remainingToday < 0 ? 'neg' : 'pos'}`, 'data-fit': true }, formatBRL(Math.abs(remainingToday))))),
-    dailyBudget < 0 && h('p', { class: 'hero-meta neg', style: 'margin-top:8px' },
-      `As contas até ${formatShort(limitingDay)} passam do que você tem.`));
+  const noRoom = dailyBudget < 0; // as contas já passam do dinheiro disponível
+  const over = !noRoom && remainingToday < 0;
+  const label = noRoom ? 'Sem folga hoje' : over ? 'Passou do limite hoje' : 'Resta para hoje';
+  const value = over ? -remainingToday : remainingToday;
+  return h('section', { class: 'hero', 'aria-label': 'Quanto resta para hoje' },
+    h('p', { class: 'hero-label' }, label),
+    h('p', { class: `hero-value ${noRoom || over ? 'neg' : ''}`, 'data-fit': true }, formatBRL(value)),
+    h('p', { class: 'hero-meta' }, noRoom
+      ? `As contas até ${formatShort(limitingDay)} passam do que você tem.`
+      : `Limite de ${formatBRL(dailyBudget)} por dia, até ${formatShort(horizonEnd)}`),
+    spentToday > 0 && h('div', { class: 'meter', role: 'progressbar', 'aria-label': 'Quanto do limite já foi gasto', 'aria-valuenow': Math.round(pct), 'aria-valuemin': 0, 'aria-valuemax': 100 },
+      h('span', { style: `width:${pct}%`, class: over || noRoom ? 'over' : '' })),
+    spentToday > 0 && h('p', { class: 'hero-meta', style: 'margin-top:8px' }, `${formatBRL(spentToday)} gastos hoje`));
 }
 
 function coverageCard(ctx) {
@@ -100,18 +99,6 @@ function nextIncome(ctx) {
         icon('chevron', { size: 18, cls: 'chev' }))));
 }
 
-function spendSheet(t) {
-  sheet(t.desc || 'Gasto', (close) => [
-    h('p', { class: 'sheet-lead' }, `${formatBRL(t.amount)} às ${timeFmt.format(new Date(t.createdAt))}, de ${store.getAccount(t.from)?.name ?? 'conta excluída'}.`),
-    h('div', { class: 'form-actions' },
-      h('button', { class: 'btn grow', onclick: close }, 'Fechar'),
-      h('button', {
-        class: 'btn danger grow',
-        onclick: () => { store.deleteTransaction(t.id); close(); toast('Gasto excluído'); },
-      }, 'Excluir gasto')),
-  ]);
-}
-
 function todaySpends(ctx) {
   const list = ctx.state.transactions.filter((t) => t.type === 'spend' && t.date === ctx.today).reverse();
   if (!list.length) return null;
@@ -120,9 +107,9 @@ function todaySpends(ctx) {
     h('h2', { class: 'section-label' }, 'Gastos de hoje'),
     h('section', { class: 'card flush' },
       h('ul', { class: 'list' }, list.map((t) => h('li', {},
-        h('button', { class: 'list-item', onclick: () => spendSheet(t) },
+        h('button', { class: 'list-item', onclick: () => transactionSheet(t) },
           h('span', { class: 'li-main' },
-            h('span', { class: 'li-title' }, t.desc || 'Gasto'),
+            h('span', { class: `li-title ${t.desc ? '' : 'muted'}` }, t.desc || 'Sem nome'),
             h('span', { class: 'li-sub' }, [t.createdAt && timeFmt.format(new Date(t.createdAt)), t.from !== def && store.getAccount(t.from)?.name].filter(Boolean).join(', '))),
           h('span', { class: 'li-value' }, formatBRL(t.amount))))))),
   ];

@@ -1,4 +1,4 @@
-// Lançar gasto: teclado numérico grande, só o valor (descrição opcional).
+// Lançar gasto: teclado numérico grande, só o valor (nome opcional).
 
 import { h, toast, sheet, fitText } from '../dom.js';
 import { icon } from '../icons.js';
@@ -8,6 +8,7 @@ import { computeDailyBudget } from '../../core/budget.js';
 import { suggestRefill } from '../../core/refill.js';
 import { todayISO } from '../../core/dates.js';
 import { refillSheet } from './today.js';
+import { spendNameList } from '../editors.js';
 
 const MAX_DIGITS = 9;
 
@@ -38,7 +39,10 @@ export function renderSpend(ctx) {
 
   const display = h('p', { class: 'amount-display', 'aria-live': 'polite', 'data-fit': true });
   const hint = h('p', { class: 'amount-hint' });
-  const desc = h('input', { type: 'text', placeholder: 'Descrição (opcional)', maxlength: 60, autocomplete: 'off', 'aria-label': 'Descrição' });
+  const desc = h('input', {
+    type: 'text', placeholder: 'Nome do gasto (opcional)', maxlength: store.NAME_MAX, autocomplete: 'off',
+    autocapitalize: 'sentences', enterkeyhint: 'done', list: 'nomes-gastos', 'aria-label': 'Nome do gasto',
+  });
   const confirmBtn = h('button', { class: 'btn primary xl block', disabled: true, onclick: save });
 
   const cents = () => {
@@ -55,7 +59,7 @@ export function renderSpend(ctx) {
     confirmBtn.textContent = v > 0 ? `Lançar ${formatBRL(v)}` : 'Digite o valor';
     const left = ctx.budget.remainingToday - v;
     hint.textContent = v === 0
-      ? `Restante hoje: ${formatBRL(ctx.budget.remainingToday)}`
+      ? `Resta para hoje: ${formatBRL(ctx.budget.remainingToday)}`
       : left >= 0 ? `Sobram ${formatBRL(left)} hoje` : `Passa ${formatBRL(-left)} do limite de hoje`;
     hint.classList.toggle('neg', v > 0 && left < 0);
     if (display.isConnected) fitText(display.parentElement);
@@ -124,7 +128,8 @@ export function renderSpend(ctx) {
     h('div', { class: 'amount-area' }, display, hint),
     h('div', { class: 'spend-opts' },
       chips && h('div', { class: 'row gap' }, h('span', { class: 'chips-label' }, 'Sai de'), chips),
-      desc),
+      desc,
+      spendNameList('nomes-gastos')),
     pad,
     confirmBtn);
 }

@@ -5,7 +5,7 @@ import { h, sheet, toast, confirmDialog } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
 import { formatBRL, formatBRLShort, parseBRL, toInput } from '../core/money.js';
-import { todayISO, formatFull, formatShort, formatDayMonth, isValidISO, addDays } from '../core/dates.js';
+import { todayISO, formatFull, formatShort, formatDayMonth, isValidISO, addDays, TIME_ZONE } from '../core/dates.js';
 import { MAX_MOVE_DAYS } from '../core/schedule.js';
 
 // ---------- campos ----------
@@ -516,4 +516,52 @@ function pickGoalThenContribution(state) {
   if (state.goals.length === 1) return editContribution(null, state.goals[0].id);
   sheet('Para qual meta?', () => h('ul', { class: 'list' },
     state.goals.map((g) => listItem(g.name, `Até ${formatFull(g.deadline)}`, null, () => editContribution(null, g.id)))));
+}
+
+// ---------- lançamentos: nome, renomear e excluir ----------
+
+export const TX_LABEL = {
+  spend: 'Gasto', transfer: 'Transferência', adjust: 'Ajuste de saldo', income: 'Receita', expense: 'Despesa fixa', contribution: 'Aporte',
+};
+const txTime = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: TIME_ZONE });
+
+/** <datalist> com os nomes de gastos já usados (sugestões ao digitar). */
+export function spendNameList(id) {
+  return h('datalist', { id }, store.recentSpendNames().map((n) => h('option', { value: n })));
+}
+
+/** Ficha de um lançamento: mostra valor e origem, permite renomear e excluir. */
+export function transactionSheet(t) {
+  const label = TX_LABEL[t.type] || 'Lançamento';
+  const isSpend = t.type === 'spend';
+  const listId = 'nomes-gastos-ficha';
+  const name = textInput(t.desc || '', {
+    placeholder: isSpend ? 'Ex.: Mercado, Almoço' : label, maxlength: store.NAME_MAX,
+    list: isSpend ? listId : null, enterkeyhint: 'done', 'data-noautofocus': '1',
+  });
+  const acc = (id) => store.getAccount(id)?.name ?? 'conta excluída';
+  const isMove = t.type === 'transfer' || t.type === 'contribution';
+  const where = isMove ? `de ${acc(t.from)} para ${acc(t.to)}` : t.from ? `de ${acc(t.from)}` : `em ${acc(t.to)}`;
+  const when = `${formatShort(t.date)}${t.createdAt && isSpend ? ` às ${txTime.format(new Date(t.createdAt))}` : ''}`;
+  sheet(t.desc || label, (close) => form(() => {
+    const next = name.value.trim();
+    if (next !== (t.desc || '')) {
+      store.renameTransaction(t.id, next);
+      toast(next ? 'Nome salvo' : 'Nome removido');
+    }
+    close();
+  },
+  h('div', { class: 'stat' },
+    h('span', { class: 'stat-label' }, `${when}, ${where}`),
+    h('span', { class: 'stat-value', style: 'font-size:1.75rem', 'data-fit': true }, formatBRL(Math.abs(t.amount)))),
+  field('Nome', name),
+  isSpend && spendNameList(listId),
+  actions(async () => {
+    const title = isSpend ? 'Excluir gasto?' : 'Excluir movimentação?';
+    const msg = isSpend ? 'O valor volta para o saldo da conta.' : 'Os saldos voltam ao que eram antes dela.';
+    if (await confirmDialog(title, msg, 'Excluir', true)) {
+      store.deleteTransaction(t.id);
+      toast(isSpend ? 'Gasto excluído' : 'Movimentação excluída');
+    }
+  })));
 }
