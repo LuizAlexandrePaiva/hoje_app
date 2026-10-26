@@ -1,6 +1,6 @@
 // Lançar gasto: teclado numérico grande, só o valor (descrição opcional).
 
-import { h, toast, sheet } from '../dom.js';
+import { h, toast, sheet, fitText } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
@@ -20,7 +20,7 @@ function warnNegative(accountId) {
   const reserve = store.getAccount(refill.fromAccountId);
   setTimeout(() => sheet(`${acc.name} ficou negativa`, (close) => [
     h('div', { class: 'stats' },
-      h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Saldo agora'), h('span', { class: 'stat-value neg' }, formatBRL(acc.balance))),
+      h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Saldo agora'), h('span', { class: 'stat-value neg', 'data-fit': true }, formatBRL(acc.balance))),
       refill.amount > 0 && h('div', { class: 'stat right' }, h('span', { class: 'stat-label' }, 'Resgate sugerido'), h('span', { class: 'stat-value' }, formatBRLShort(refill.amount)))),
     h('p', { class: 'sheet-lead' }, refill.amount > 0
       ? `Traga o valor de ${reserve?.name} para cobrir o saldo e os próximos dias.`
@@ -36,7 +36,7 @@ export function renderSpend(ctx) {
   let text = ''; // o que foi digitado, ex.: "12,5"
   let accountId = state.settings.defaultAccountId;
 
-  const display = h('p', { class: 'amount-display', 'aria-live': 'polite' });
+  const display = h('p', { class: 'amount-display', 'aria-live': 'polite', 'data-fit': true });
   const hint = h('p', { class: 'amount-hint' });
   const desc = h('input', { type: 'text', placeholder: 'Descrição (opcional)', maxlength: 60, autocomplete: 'off', 'aria-label': 'Descrição' });
   const confirmBtn = h('button', { class: 'btn primary xl block', disabled: true, onclick: save });
@@ -58,6 +58,7 @@ export function renderSpend(ctx) {
       ? `Restante hoje: ${formatBRL(ctx.budget.remainingToday)}`
       : left >= 0 ? `Sobram ${formatBRL(left)} hoje` : `Passa ${formatBRL(-left)} do limite de hoje`;
     hint.classList.toggle('neg', v > 0 && left < 0);
+    if (display.isConnected) fitText(display.parentElement);
   }
 
   function press(key) {

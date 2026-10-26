@@ -2,7 +2,7 @@ import * as store from './data/store.js';
 import { todayISO } from './core/dates.js';
 import { computeDailyBudget } from './core/budget.js';
 import { suggestRefill, suggestSurplus } from './core/refill.js';
-import { afterSheetClosed, toast } from './ui/dom.js';
+import { afterSheetClosed, toast, fitText } from './ui/dom.js';
 import * as sync from './data/sync.js';
 import { conflictSheet } from './ui/backup.js';
 import { iconSVG } from './ui/icons.js';
@@ -63,6 +63,7 @@ function render() {
   const keepScroll = main.dataset.route === route;
   const y = window.scrollY;
   main.replaceChildren(view);
+  fitText(main);
   main.dataset.route = route;
   window.scrollTo(0, keepScroll ? y : 0);
   tabbar.hidden = !state.setupDone || FULLSCREEN.has(route);
@@ -89,6 +90,7 @@ sync.onStatus(() => { if (['#/ajustes', '#/setup'].includes(main.dataset.route))
 window.addEventListener('hashchange', render);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDay(); });
 setInterval(checkDay, 60 * 1000);
+window.addEventListener('resize', () => fitText());
 render();
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

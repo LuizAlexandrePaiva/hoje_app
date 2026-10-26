@@ -383,7 +383,7 @@ export function eventSheet(event) {
   sheet(event.name, () => [
     h('div', { class: 'stat' },
       h('span', { class: 'stat-label' }, `Previsto para ${formatDayMonth(event.date, ref)}${moved ? `, antes ${formatDayMonth(event.originalDate, ref)}` : ''}`),
-      h('span', { class: `stat-value ${event.kind === 'income' ? 'pos' : ''}`, style: 'font-size:1.75rem' }, formatBRL(event.amount))),
+      h('span', { class: `stat-value ${event.kind === 'income' ? 'pos' : ''}`, style: 'font-size:1.75rem', 'data-fit': true }, formatBRL(event.amount))),
     h('button', { class: 'btn primary block', onclick: () => confirmOccurrenceSheet(event) }, cfg.early),
     h('button', { class: 'btn block', onclick: () => moveSheet(event) }, 'Mudar a data'),
   ]);

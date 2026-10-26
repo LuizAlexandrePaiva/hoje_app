@@ -45,15 +45,15 @@ function hero(ctx) {
   const spent = spentToday > 0;
   return h('section', { class: 'hero', 'aria-label': 'Orçamento de hoje' },
     h('p', { class: 'hero-label' }, 'Você pode gastar hoje'),
-    h('p', { class: `hero-value ${dailyBudget < 0 ? 'neg' : ''}` }, formatBRL(dailyBudget)),
+    h('p', { class: `hero-value ${dailyBudget < 0 ? 'neg' : ''}`, 'data-fit': true }, formatBRL(dailyBudget)),
     h('p', { class: 'hero-meta' }, `Por dia, até ${formatShort(horizonEnd)}`),
     spent && h('div', { class: 'meter', role: 'progressbar', 'aria-label': 'Quanto já gastou hoje', 'aria-valuenow': Math.round(pct), 'aria-valuemin': 0, 'aria-valuemax': 100 },
       h('span', { style: `width:${pct}%`, class: remainingToday < 0 ? 'over' : '' })),
     spent && h('div', { class: 'hero-foot' },
-      h('div', {}, h('p', { class: 'k' }, 'Gasto'), h('p', { class: 'v' }, formatBRL(spentToday))),
+      h('div', {}, h('p', { class: 'k' }, 'Gasto'), h('p', { class: 'v', 'data-fit': true }, formatBRL(spentToday))),
       h('div', { style: 'text-align:right' },
         h('p', { class: 'k' }, remainingToday < 0 ? 'Passou' : 'Restante'),
-        h('p', { class: `v ${remainingToday < 0 ? 'neg' : 'pos'}` }, formatBRL(Math.abs(remainingToday))))),
+        h('p', { class: `v ${remainingToday < 0 ? 'neg' : 'pos'}`, 'data-fit': true }, formatBRL(Math.abs(remainingToday))))),
     dailyBudget < 0 && h('p', { class: 'hero-meta neg', style: 'margin-top:8px' },
       `As contas até ${formatShort(limitingDay)} passam do que você tem.`));
 }

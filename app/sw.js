@@ -1,7 +1,7 @@
 // Service worker: cache-first para os arquivos do app (funciona 100% offline
 // depois da primeira visita). Ao publicar mudanças, aumente CACHE_VERSION.
 
-const CACHE_VERSION = '1.4.0';
+const CACHE_VERSION = '1.4.1';
 const CACHE = `hoje-${CACHE_VERSION}`;
 
 const APP_FILES = [

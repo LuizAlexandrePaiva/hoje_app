@@ -36,7 +36,7 @@ function goalCard(ctx, g) {
         h('span', { class: 'li-sub' }, `Até ${formatDayMonth(g.deadline, year)}`)),
       h('button', { class: 'icon-btn', 'aria-label': `Editar meta ${g.name}`, onclick: () => editGoal(g) }, icon('edit', { size: 20 }))),
     h('div', { class: 'row between', style: 'align-items:baseline' },
-      h('span', { class: 'stat-value' }, formatBRL(saved)),
+      h('span', { class: 'stat-value', 'data-fit': true }, formatBRL(saved)),
       h('span', { class: 'muted small' }, `de ${formatBRLShort(g.target)}`)),
     h('div', { class: 'meter lg', role: 'progressbar', 'aria-label': 'Progresso da meta', 'aria-valuenow': Math.round(pct), 'aria-valuemin': 0, 'aria-valuemax': 100 },
       h('span', { style: `width:${pct}%` })),

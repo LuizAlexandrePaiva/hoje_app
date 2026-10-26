@@ -32,6 +32,22 @@ export function svg(tag, attrs = {}, ...children) {
   return el;
 }
 
+// ---------- texto que precisa caber ----------
+
+const FIT_MIN_PX = 12;
+
+/** Reduz a fonte dos elementos [data-fit] até o texto caber na largura. */
+export function fitText(root = document) {
+  for (const el of root.querySelectorAll('[data-fit]')) {
+    el.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    while (el.scrollWidth > el.clientWidth + 1 && size > FIT_MIN_PX) {
+      size -= 1;
+      el.style.fontSize = `${size}px`;
+    }
+  }
+}
+
 // ---------- folha modal (bottom sheet) ----------
 
 let openSheet = null;
@@ -67,6 +83,7 @@ export function sheet(title, build, { onClose } = {}) {
     window.addEventListener('popstate', onPop, { once: true });
   }
   openSheet = { backdrop, onPop, onClose };
+  fitText(panel);
   requestAnimationFrame(() => {
     backdrop.classList.add('open');
     const first = panel.querySelector('input:not([type=checkbox]):not([type=radio]), select');

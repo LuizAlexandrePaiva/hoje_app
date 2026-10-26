@@ -16,7 +16,7 @@ function accountSheet(ctx, a) {
   sheet(a.name, () => [
     h('div', { class: 'stat' },
       h('span', { class: 'stat-label' }, 'Saldo'),
-      h('span', { class: `stat-value ${a.balance < 0 ? 'neg' : ''}`, style: 'font-size:2rem' }, formatBRL(a.balance))),
+      h('span', { class: `stat-value ${a.balance < 0 ? 'neg' : ''}`, style: 'font-size:2rem', 'data-fit': true }, formatBRL(a.balance))),
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn grow', onclick: () => adjustSheet(a) }, icon('edit', { size: 18 }), 'Ajustar saldo'),
       h('button', {
@@ -84,7 +84,7 @@ export function renderAccounts(ctx) {
     h('header', { class: 'screen-head' }, h('h1', {}, 'Contas')),
     h('section', { class: 'hero' },
       h('p', { class: 'hero-label' }, 'Total para gastar'),
-      h('p', { class: `hero-value ${total < 0 ? 'neg' : ''}`, style: 'color:var(--text);font-size:2.5rem' }, formatBRL(total))),
+      h('p', { class: `hero-value ${total < 0 ? 'neg' : ''}`, style: 'color:var(--text);font-size:2.5rem', 'data-fit': true }, formatBRL(total))),
     h('h2', { class: 'section-label' }, 'Contas de gasto'),
     accountList(ctx, spending),
     goal.length > 0 && h('h2', { class: 'section-label' }, 'Fora do orçamento'),
