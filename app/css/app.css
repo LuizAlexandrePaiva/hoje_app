@@ -35,6 +35,7 @@
   --r-card: 20px;
   --r-control: 14px;
   --tab-h: 64px;
+  --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 16px;
@@ -57,7 +58,7 @@ button { font: inherit; color: inherit; }
 .main {
   max-width: 560px;
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(var(--tab-h) + var(--safe-b) + 32px);
+  padding: calc(var(--safe-t) + 16px) 16px calc(var(--tab-h) + var(--safe-b) + 32px);
 }
 body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
 .screen { display: flex; flex-direction: column; gap: 16px; }
@@ -331,7 +332,7 @@ body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
 .tabbar a.active { color: var(--pos); }
 
 /* ---------- lançar gasto ---------- */
-.spend { min-height: calc(100dvh - 32px - var(--safe-b)); gap: 10px; }
+.spend { min-height: calc(100dvh - var(--safe-t) - var(--safe-b) - 32px); gap: 10px; }
 .topbar { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; }
 .topbar h1 { text-align: center; font-size: var(--fs-title); font-weight: 650; }
 .amount-area { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px; min-height: 150px; }
@@ -455,3 +456,11 @@ body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
 /* rede de segurança: nada empurra a tela para os lados */
 html, body, .main { overflow-x: clip; }
 .sheet { overflow-x: hidden; }
+
+/* telas baixas (iPhone SE e afins): teclado e valor mais compactos */
+@media (max-height: 720px) {
+  .spend { gap: 8px; }
+  .amount-area { min-height: 96px; }
+  .key { min-height: 50px; font-size: 1.45rem; }
+  .spend .btn.xl { min-height: 52px; }
+}
