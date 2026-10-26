@@ -1,0 +1,20 @@
+# Site estático, sem build: o Netlify publica a pasta raiz como está.
+[build]
+  publish = "."
+
+# O service worker precisa ser revalidado sempre para as atualizações chegarem.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"

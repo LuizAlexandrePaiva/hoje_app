@@ -44,15 +44,29 @@ Os testes usam um cenário **fictício** (`tests/fixtures.js`), equivalente ao d
 - Receitas, despesas e aportes só mexem no saldo quando você confirma ("Recebeu?" / "Pagou?" / "Fez o aporte?"). Até lá, contam como previstos. Se atrasarem, contam como previstos para hoje.
 - Datas são strings `AAAA-MM-DD`, e "hoje" é calculado no fuso `America/Sao_Paulo`. Valores são guardados em centavos inteiros.
 
-## Publicar no GitHub Pages
+## Publicar no Netlify
 
-1. Envie os arquivos para a branch `main` do repositório (já feito neste repositório).
-2. No GitHub, abra o repositório → **Settings** → **Pages**.
-3. Em **Build and deployment** → **Source**, escolha **Deploy from a branch**.
-4. Em **Branch**, escolha `main` e a pasta `/ (root)`. Clique em **Save**.
-5. Espere 1–2 minutos. O endereço aparece no topo da página de Pages, algo como `https://SEU-USUARIO.github.io/hoje_app/`.
+O site é estático e não tem build. O `netlify.toml` já configura tudo: publica a pasta raiz e envia o `sw.js` sem cache, para as atualizações chegarem.
 
-> O GitHub Pages gratuito exige repositório **público**. Isso publica só o código; seus dados continuam só no celular. Com repositório privado, o Pages precisa do GitHub Pro.
+### Opção 1 — ligado ao GitHub (recomendada: cada push publica sozinho)
+
+1. Entre em https://app.netlify.com (dá para criar a conta com o GitHub).
+2. **Add new site** → **Import an existing project** → **GitHub**.
+3. Autorize o Netlify e escolha o repositório **hoje_app**.
+4. Confira as configurações (o `netlify.toml` já preenche):
+   - **Branch to deploy:** `main`
+   - **Build command:** deixe vazio
+   - **Publish directory:** `.`
+5. Clique em **Deploy**. Em menos de 1 minuto o site fica no ar em `https://nome-aleatorio.netlify.app`.
+6. Para escolher o nome: **Site configuration** → **Change site name** (ex.: `hoje-financas` → `https://hoje-financas.netlify.app`).
+
+Funciona com repositório **privado** no plano gratuito. A partir daí, todo `git push` na `main` publica uma nova versão.
+
+### Opção 2 — arrastar e soltar (sem GitHub)
+
+1. Baixe o repositório como ZIP e descompacte.
+2. Entre em https://app.netlify.com/drop, faça login e arraste a pasta.
+3. Para atualizar, arraste a pasta de novo em **Deploys** do site.
 
 ### Publicar uma nova versão
 
@@ -60,7 +74,7 @@ Ao mudar qualquer arquivo, aumente `CACHE_VERSION` em `sw.js` (e `APP_VERSION` e
 
 ## Instalar no celular
 
-**Android (Chrome):** abra o endereço do Pages → menu ⋮ → **Instalar app** (ou "Adicionar à tela inicial").
+**Android (Chrome):** abra o endereço do Netlify → menu ⋮ → **Instalar app** (ou "Adicionar à tela inicial").
 
 **iPhone (Safari):** abra o endereço no **Safari** → botão Compartilhar → **Adicionar à Tela de Início**.
 
@@ -73,11 +87,11 @@ Depois de instalado, abra o app uma vez com internet. A partir daí ele funciona
 ## Estrutura
 
 ```
-index.html  manifest.webmanifest  sw.js  css/app.css  icons/
+index.html  manifest.webmanifest  sw.js  netlify.toml  css/app.css  icons/
 js/app.js                 roteador, renderização, virada de dia
 js/core/                  lógica pura (testada no Node)
 js/data/                  estado salvo e lançamentos
 js/ui/                    componentes, formulários e telas
 tests/                    testes (node --test)
-tools/gen-icons.py        gera os ícones PNG (Pillow)
+tools/gen-icons.py        gera os ícones PNG (moeda com R$; Pillow + fonte Inter)
 ```
