@@ -4,7 +4,7 @@ import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
 import { formatHeader, formatShort, relative, addDays, TIME_ZONE } from '../../core/dates.js';
 import { openEvents, pendingConfirmations } from '../../core/schedule.js';
-import { confirmOccurrenceSheet, transferSheet } from '../editors.js';
+import { confirmOccurrenceSheet, transferSheet, eventSheet } from '../editors.js';
 import { backupBanner } from '../backup.js';
 
 const ASK = { income: 'Recebeu?', expense: 'Pagou?', contribution: 'Aportou?' };
@@ -90,12 +90,14 @@ function nextIncome(ctx) {
     .find((e) => e.kind === 'income' && e.date > ctx.today);
   if (!next) return null;
   return h('section', { class: 'card flush' },
-    h('div', { class: 'row-item' },
+    h('button', { class: 'list-item', onclick: () => eventSheet(next) },
       h('span', { class: 'li-main' },
         h('span', { class: 'caption' }, 'Próximo recebimento'),
         h('span', { class: 'li-title' }, next.name),
         h('span', { class: 'li-sub' }, relative(ctx.today, next.date))),
-      h('span', { class: 'li-value pos' }, `+${formatBRLShort(next.amount)}`)));
+      h('span', { class: 'li-end' },
+        h('span', { class: 'li-value pos' }, `+${formatBRLShort(next.amount)}`),
+        icon('chevron', { size: 18, cls: 'chev' }))));
 }
 
 function spendSheet(t) {

@@ -5,7 +5,8 @@ import { h, sheet, toast, confirmDialog } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
 import { formatBRL, formatBRLShort, parseBRL, toInput } from '../core/money.js';
-import { todayISO, formatFull, formatShort, formatDayMonth, isValidISO } from '../core/dates.js';
+import { todayISO, formatFull, formatShort, formatDayMonth, isValidISO, addDays } from '../core/dates.js';
+import { MAX_MOVE_DAYS } from '../core/schedule.js';
 
 // ---------- campos ----------
 
@@ -367,10 +368,56 @@ export function transferSheet({ from, to, amount, title = 'Transferir', desc = '
 }
 
 const CONFIRM = {
-  income: { title: 'Recebeu?', ok: 'Confirmar recebimento', skip: 'Não veio', where: 'Entra em' },
-  expense: { title: 'Pagou?', ok: 'Confirmar pagamento', skip: 'Pular este mês', where: 'Sai de' },
-  contribution: { title: 'Fez o aporte?', ok: 'Confirmar aporte', skip: 'Pular', where: 'Sai de' },
+  income: { title: 'Recebeu?', ok: 'Confirmar recebimento', skip: 'Não veio', where: 'Entra em', early: 'Já recebi' },
+  expense: { title: 'Pagou?', ok: 'Confirmar pagamento', skip: 'Pular este mês', where: 'Sai de', early: 'Já paguei' },
+  contribution: { title: 'Fez o aporte?', ok: 'Confirmar aporte', skip: 'Pular', where: 'Sai de', early: 'Já aportei' },
 };
+
+const yearOf = (d) => Number(d.slice(0, 4));
+
+/** Detalhes de um evento previsto: confirmar agora ou mudar a data. */
+export function eventSheet(event) {
+  const cfg = CONFIRM[event.kind];
+  const ref = yearOf(todayISO());
+  const moved = event.originalDate && event.date !== event.originalDate;
+  sheet(event.name, () => [
+    h('div', { class: 'stat' },
+      h('span', { class: 'stat-label' }, `Previsto para ${formatDayMonth(event.date, ref)}${moved ? `, antes ${formatDayMonth(event.originalDate, ref)}` : ''}`),
+      h('span', { class: `stat-value ${event.kind === 'income' ? 'pos' : ''}`, style: 'font-size:1.75rem' }, formatBRL(event.amount))),
+    h('button', { class: 'btn primary block', onclick: () => confirmOccurrenceSheet(event) }, cfg.early),
+    h('button', { class: 'btn block', onclick: () => moveSheet(event) }, 'Mudar a data'),
+  ]);
+}
+
+/** Receita que vai cair antes ou depois, conta adiada, aporte em outro dia. */
+export function moveSheet(event) {
+  const today = todayISO();
+  const cfg = CONFIRM[event.kind];
+  const ref = yearOf(today);
+  const base = event.originalDate || event.date;
+  const isContribution = event.kind === 'contribution';
+  const earliest = isContribution ? today : [today, addDays(base, -MAX_MOVE_DAYS)].sort()[1];
+  const latest = isContribution ? null : addDays(base, MAX_MOVE_DAYS);
+  const date = dateInput(event.date > today ? event.date : today, { min: earliest, max: latest, 'data-noautofocus': '1' });
+  const err = errorBox();
+  const moved = !isContribution && event.date !== base;
+  sheet('Mudar a data', (close) => form(() => {
+    const d = date.value;
+    if (!isValidISO(d) || d < earliest) return fail(err, `Escolha de hoje em diante. Se já aconteceu, use “${cfg.early}”.`);
+    if (latest && d > latest) return fail(err, `Até ${formatDayMonth(latest, ref)}. Se não vier, use “${cfg.skip}”.`);
+    store.moveOccurrence(event, d);
+    close();
+    toast(`${event.name}: ${formatDayMonth(d, ref)}`);
+  },
+  h('p', { class: 'sheet-lead' }, `${event.name} estava previsto para ${formatDayMonth(event.date, ref)}. O limite do dia passa a contar com a nova data.`),
+  field('Nova data', date),
+  moved && h('button', {
+    type: 'button', class: 'btn quiet block',
+    onclick: () => { store.moveOccurrence(event, base); close(); toast(`${event.name}: ${formatDayMonth(base, ref)}`); },
+  }, `Voltar para ${formatDayMonth(base, ref)}`),
+  err,
+  actions(null, 'Salvar data')));
+}
 
 export function confirmOccurrenceSheet(event) {
   const today = todayISO();
@@ -395,7 +442,8 @@ export function confirmOccurrenceSheet(event) {
       type: 'button', class: 'btn',
       onclick: () => { store.skipOccurrence(event); close(); toast(`${event.name}: marcado como não ocorrido`); },
     }, cfg.skip),
-    h('button', { type: 'submit', class: 'btn primary' }, cfg.ok))));
+    h('button', { type: 'submit', class: 'btn primary' }, cfg.ok)),
+  h('button', { type: 'button', class: 'btn quiet block', onclick: () => moveSheet(event) }, 'Vai ser em outro dia')));
 }
 
 // ---------- listas editáveis ----------

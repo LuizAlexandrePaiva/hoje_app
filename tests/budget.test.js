@@ -138,3 +138,31 @@ test('projeção: arredondamento do orçamento não vira saldo negativo', async 
   const p = projectBalance(s, TODAY, b).points.find((x) => x.date === b.horizonEnd);
   assert.equal(p.spending, 0); // 2.379 − 14 × 169,93 = −0,02 → 0
 });
+
+test('salário veio antes: confirmar antecipado leva o horizonte ao mês seguinte sem contar em dobro', () => {
+  const s = scenario();
+  // salário (previsto 9/11) caiu em 6/11 e foi confirmado
+  applyTransaction(s, { id: 'sal', type: 'income', date: '2026-11-06', amount: 250000, to: 'cc', ref: 'income:sal:2026-11' });
+  const b = computeDailyBudget(s, '2026-11-06');
+  assert.equal(b.nextSalary.date, '2026-12-07');
+  // o salário de novembro está no saldo e não aparece mais como previsto
+  assert.equal(b.spendableStart, 237900 + 250000);
+});
+
+test('salário vai atrasar: mudar a data estica o horizonte e o dinheiro só entra no novo dia', () => {
+  const s = scenario();
+  s.moved = { 'income:sal:2026-11': '2026-11-12' };
+  const b = computeDailyBudget(s, TODAY);
+  assert.equal(b.nextSalary.date, '2026-11-12');
+  assert.equal(b.horizonEnd, '2026-11-11');
+  // até 10/11 só existe o saldo atual; o aluguel de 11/11 ainda entra no último dia
+  assert.equal(b.days, 17);
+  assert.equal(b.dailyBudget, Math.round(237900 / 16));
+});
+
+test('receita antecipada para dentro do período conta a partir da nova data', () => {
+  const s = scenario();
+  s.moved = { 'income:alugA:2026-11': '2026-10-30' }; // aluguel de 11/11 veio para 30/10
+  const b = computeDailyBudget(s, TODAY);
+  assert.equal(b.dailyBudget, Math.round((237900 + 135000) / 14));
+});

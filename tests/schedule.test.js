@@ -41,3 +41,23 @@ test('aporte vira débito da conta de origem e crédito da meta', () => {
   assert.equal(ev.toAccountId, 'fundo');
   assert.equal(ev.amount, 160000);
 });
+
+test('data mudada: pendência só aparece na nova data e guarda a original', () => {
+  const s = scenario();
+  s.moved = { 'income:sal:2026-11': '2026-11-12' };
+  assert.deepEqual(pendingConfirmations(s, '2026-11-10').map((e) => e.key), []);
+  const p = pendingConfirmations(s, '2026-11-12').find((e) => e.key === 'income:sal:2026-11');
+  assert.ok(p);
+  assert.equal(p.date, '2026-11-12');
+  assert.equal(p.originalDate, '2026-11-09');
+});
+
+test('data mudada para outro mês continua na mesma ocorrência', () => {
+  const s = scenario();
+  s.moved = { 'expense:fatura:2026-11': '2026-12-03' }; // fatura de 25/11 adiada
+  const ev = expandOccurrences(s, TODAY, '2026-12-31').filter((e) => e.kind === 'expense');
+  assert.deepEqual(ev.map((e) => [e.key, e.date]), [
+    ['expense:fatura:2026-11', '2026-12-03'],
+    ['expense:fatura:2026-12', '2026-12-25'],
+  ]);
+});

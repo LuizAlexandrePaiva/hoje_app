@@ -20,23 +20,30 @@ function amountFor(item, mk) {
   return ex != null ? ex : item.amount;
 }
 
-function monthly(item, kind, from, to) {
+/** Quanto uma ocorrência pode ser adiada ou antecipada (dias). */
+export const MAX_MOVE_DAYS = 45;
+
+function monthly(item, kind, from, to, moved) {
   const out = [];
-  const start = item.since && item.since > from ? item.since : from;
-  const a = parts(start);
+  const a = parts(from);
   const b = parts(to);
-  // começa um mês antes: a regra de sábado pode antecipar para o mês anterior
-  for (let { y, m } = addMonths(a.y, a.m, -1); y * 12 + m <= b.y * 12 + b.m; ({ y, m } = addMonths(y, m, 1))) {
+  // dois meses de folga em cada ponta: datas mudadas (até 45 dias) e a
+  // regra de sábado podem trazer uma ocorrência de outro mês para o período
+  for (let { y, m } = addMonths(a.y, a.m, -2); y * 12 + m <= b.y * 12 + b.m + 2; ({ y, m } = addMonths(y, m, 1))) {
     const rule = kind === 'expense' ? { type: 'fixedDay', day: item.day } : item.rule;
-    const date = ruleDate(rule, y, m);
-    if (!date || date < start || date > to) continue;
+    const original = ruleDate(rule, y, m);
+    if (!original || (item.since && original < item.since)) continue;
     const mk = iso(y, m, 1).slice(0, 7);
+    const key = `${kind}:${item.id}:${mk}`;
+    const date = moved[key] || original;
+    if (date < from || date > to) continue;
     out.push({
-      key: `${kind}:${item.id}:${mk}`,
+      key,
       kind,
       sourceId: item.id,
       name: item.name,
       date,
+      originalDate: original,
       amount: amountFor(item, mk),
       accountId: item.accountId,
       isSalary: kind === 'income' && !!item.isSalary,
@@ -52,13 +59,14 @@ function monthly(item, kind, from, to) {
  */
 export function expandOccurrences(state, from, to) {
   const out = [];
+  const moved = state.moved || {};
   for (const inc of state.incomes || []) {
     if (inc.active === false) continue;
-    out.push(...monthly(inc, 'income', from, to));
+    out.push(...monthly(inc, 'income', from, to, moved));
   }
   for (const exp of state.expenses || []) {
     if (exp.active === false) continue;
-    out.push(...monthly(exp, 'expense', from, to));
+    out.push(...monthly(exp, 'expense', from, to, moved));
   }
   const goals = new Map((state.goals || []).map((g) => [g.id, g]));
   for (const c of state.contributions || []) {
@@ -71,6 +79,7 @@ export function expandOccurrences(state, from, to) {
       sourceId: c.id,
       name: `Aporte: ${goal.name}`,
       date: c.date,
+      originalDate: c.date,
       amount: c.amount,
       accountId: c.fromAccountId,
       toAccountId: goal.accountId,

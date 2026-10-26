@@ -26,6 +26,7 @@ export function emptyState(today = todayISO()) {
     goals: [],
     contributions: [],
     settled: {},
+    moved: {}, // datas mudadas de ocorrências: { chave: 'AAAA-MM-DD' }
     transactions: [],
   };
 }
@@ -83,6 +84,7 @@ function normalize(data) {
     if (!Array.isArray(s[k])) s[k] = [];
   }
   if (!s.settled || typeof s.settled !== 'object') s.settled = {};
+  if (!s.moved || typeof s.moved !== 'object') s.moved = {};
   for (const a of s.accounts) {
     if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('Conta inválida no backup');
   }
@@ -149,6 +151,20 @@ export function confirmOccurrence(event, { amount, date }) {
       : event.kind === 'expense' ? { type: 'expense', from: event.accountId }
         : { type: 'contribution', from: event.accountId, to: event.toAccountId };
   return commit((s) => applyTransaction(s, tx({ ...base, ...fields })));
+}
+
+/** Muda a data prevista de uma ocorrência (receita veio antes/depois, conta adiada). */
+export function moveOccurrence(event, date) {
+  commit((s) => {
+    if (event.kind === 'contribution') {
+      const c = s.contributions.find((x) => x.id === event.sourceId);
+      if (c) c.date = date;
+    } else if (date === event.originalDate) {
+      delete s.moved[event.key];
+    } else {
+      s.moved[event.key] = date;
+    }
+  });
 }
 
 /** "Não veio este mês": fecha a ocorrência sem mexer em saldo. */

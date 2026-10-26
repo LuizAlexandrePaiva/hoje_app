@@ -7,6 +7,7 @@ import { projectBalance } from '../../core/projection.js';
 import { spendingAccountIds } from '../../core/budget.js';
 import { flowInto } from '../../core/schedule.js';
 import * as store from '../../data/store.js';
+import { eventSheet } from '../editors.js';
 
 const W = 360;
 const H = 200;
@@ -141,12 +142,13 @@ function eventList(ctx, proj) {
   // conta só aparece quando não é a padrão; atraso sempre aparece
   const sub = (e) => {
     if (e.overdue) return `Atrasado, previsto para ${formatShort(e.date)}`;
+    if (e.originalDate && e.date !== e.originalDate) return `Data mudada, era ${formatShort(e.originalDate)}`;
     if (e.accountId === def) return null;
     return e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
   };
   return h('div', {}, [...groups].map(([date, evs]) => h('div', { class: 'day-group' },
     h('div', { class: 'day-head' }, h('strong', {}, formatLong(date)), h('span', { class: 'muted' }, relative(ctx.today, date))),
-    evs.map((e) => h('div', { class: 'ev' },
+    evs.map((e) => h('button', { class: 'ev', onclick: () => eventSheet(e) },
       h('span', { class: `ev-dot ${e.kind === 'income' ? 'in' : 'out'}` }),
       h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: 'li-sub' }, sub(e))),
       h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` },

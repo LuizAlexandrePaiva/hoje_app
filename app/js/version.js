@@ -1,2 +1,2 @@
 // Mantenha igual a CACHE_VERSION em sw.js ao publicar uma nova versão.
-export const APP_VERSION = '1.3.1';
+export const APP_VERSION = '1.4.0';

@@ -384,7 +384,10 @@ body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
 .day-group { padding: 12px 0; display: flex; flex-direction: column; gap: 6px; }
 .day-head { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--fs-small); }
 .day-head strong::first-letter { text-transform: uppercase; }
-.ev { display: flex; align-items: center; gap: 12px; }
+.ev {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px;
+  background: none; border: 0; padding: 4px 0; text-align: left; cursor: pointer;
+}
 .ev-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
 .ev-dot.in { background: var(--pos); }
 .ev-dot.out { background: var(--neg); }
@@ -423,3 +426,11 @@ body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
 .code-input::placeholder { text-transform: none; letter-spacing: .06em; }
 .sheet .features .ico { background: var(--pos-soft); }
 .features .li-sub, .features .li-title { white-space: normal; }
+
+/* iOS 26, app instalado: com a barra de status translúcida o WebKit encurta a
+   tela pela altura da barra de status enquanto a página for menor que a tela
+   (WebKit 301108), e a barra de abas fica acima da borda. Página com pelo
+   menos a altura da tela evita isso; o min() impede rolagem extra. */
+@media (display-mode: standalone) {
+  html { min-height: min(100lvh, calc(100% + env(safe-area-inset-top))); }
+}
