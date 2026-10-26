@@ -1,5 +1,7 @@
 // Utilitários mínimos de interface (sem framework).
 
+import { icon } from './icons.js';
+
 /** h('div', { class: 'x', onclick }, filho1, filho2…) */
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -39,6 +41,7 @@ let openSheet = null;
  * Fecha ao tocar fora ou no botão voltar do Android (via histórico).
  */
 export function sheet(title, build, { onClose } = {}) {
+  document.querySelector('.toast')?.remove();
   // Trocar de folha reaproveita a entrada de histórico já criada
   const previous = openSheet;
   if (previous) {
@@ -51,7 +54,7 @@ export function sheet(title, build, { onClose } = {}) {
   const panel = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('div', { class: 'sheet-head' },
       h('h2', {}, title),
-      h('button', { class: 'icon-btn', 'aria-label': 'Fechar', onclick: close }, '✕')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Fechar', onclick: close }, icon('close'))),
     h('div', { class: 'sheet-body' }, build(close)));
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
   backdrop.append(panel);
@@ -107,16 +110,16 @@ export function toast(message, action) {
       onclick: () => { el.remove(); action.run(); },
     }, action.label));
   document.body.append(el);
-  toastTimer = setTimeout(() => el.remove(), action ? 6000 : 3000);
+  toastTimer = setTimeout(() => el.remove(), action ? 5000 : 2500);
 }
 
 export function confirmDialog(title, message, okLabel = 'Confirmar', danger = false) {
   return new Promise((resolve) => {
     let answer = false;
     sheet(title, (close) => [
-      h('p', { class: 'muted' }, message),
-      h('div', { class: 'row gap' },
-        h('button', { class: 'btn ghost grow', onclick: close }, 'Cancelar'),
+      h('p', { class: 'sheet-lead' }, message),
+      h('div', { class: 'form-actions' },
+        h('button', { class: 'btn grow', onclick: close }, 'Cancelar'),
         h('button', { class: `btn grow ${danger ? 'danger' : 'primary'}`, onclick: () => { answer = true; close(); } }, okLabel)),
     ], { onClose: () => resolve(answer) });
   });

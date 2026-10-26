@@ -64,3 +64,13 @@ test('aritmética de datas sem bugs de fuso', () => {
   assert.equal(todayISO(new Date('2026-10-27T02:30:00Z')), '2026-10-26');
   assert.equal(todayISO(new Date('2026-10-27T03:00:00Z')), '2026-10-27');
 });
+
+test('formatação de datas em pt-BR', async () => {
+  const { formatShort, formatFull, formatLong, formatHeader, formatDayMonth } = await import('../js/core/dates.js');
+  assert.equal(formatShort('2026-11-09'), '09/11');
+  assert.equal(formatFull('2026-11-27'), '27/11/2026');
+  assert.equal(formatLong('2026-11-09'), 'seg, 9 de nov');
+  assert.equal(formatHeader('2026-10-26'), 'segunda, 26 de outubro');
+  assert.equal(formatDayMonth('2026-11-27', 2026), '27 de nov');
+  assert.equal(formatDayMonth('2027-02-10', 2026), '10 de fev de 2027');
+});

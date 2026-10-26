@@ -1,58 +1,62 @@
 import { h, toast, confirmDialog } from '../dom.js';
+import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL } from '../../core/money.js';
 import { formatShort } from '../../core/dates.js';
-import { adjustSheet, transferSheet, editAccount } from '../editors.js';
+import { adjustSheet, transferSheet, addButton, editAccount } from '../editors.js';
 
 const TYPE_LABEL = {
-  spend: 'Gasto', transfer: 'Transferência', adjust: 'Ajuste', income: 'Receita', expense: 'Despesa fixa', contribution: 'Aporte',
+  spend: 'Gasto', transfer: 'Transferência', adjust: 'Ajuste de saldo', income: 'Receita', expense: 'Despesa fixa', contribution: 'Aporte',
 };
 
 const HISTORY_LIMIT = 40;
 
 function accountCard(ctx, a) {
   const s = ctx.state.settings;
-  const tags = [
-    a.id === s.defaultAccountId && 'padrão dos gastos',
-    a.id === s.reserveAccountId && 'reserva',
+  const badges = [
+    a.id === s.defaultAccountId && h('span', { class: 'badge pos' }, 'Padrão dos gastos'),
+    a.id === s.reserveAccountId && h('span', { class: 'badge' }, 'Reserva'),
   ].filter(Boolean);
-  return h('section', { class: 'card account' },
-    h('div', { class: 'row between' },
-      h('div', {},
-        h('p', { class: 'li-title' }, a.name),
-        h('p', { class: 'muted small' }, a.kind === 'goal' ? 'Meta / investimento — fora do orçamento' : 'Conta de gasto', tags.length ? ` · ${tags.join(' · ')}` : '')),
-      h('p', { class: `big ${a.balance < 0 ? 'neg' : ''}` }, formatBRL(a.balance))),
+  return h('section', { class: 'card' },
+    h('div', { class: 'card-head' },
+      h('div', { class: 'li-main' }, h('h3', { class: 'card-title' }, a.name), badges.length > 0 && h('div', { class: 'badges', style: 'margin-top:4px' }, badges)),
+      h('span', { class: `stat-value ${a.balance < 0 ? 'neg' : ''}` }, formatBRL(a.balance))),
     h('div', { class: 'row gap' },
-      h('button', { class: 'btn ghost grow', onclick: () => adjustSheet(a) }, 'Ajustar saldo'),
-      h('button', { class: 'btn ghost grow', onclick: () => transferSheet({ from: a.id, to: a.id === s.defaultAccountId ? s.reserveAccountId : s.defaultAccountId }) }, 'Transferir')));
+      h('button', { class: 'btn small grow', onclick: () => adjustSheet(a) }, icon('edit', { size: 18 }), 'Ajustar'),
+      h('button', {
+        class: 'btn small grow',
+        onclick: () => transferSheet({ from: a.id, to: a.id === s.defaultAccountId ? s.reserveAccountId : s.defaultAccountId }),
+      }, icon('transfer', { size: 18 }), 'Transferir')));
 }
 
 function history(ctx) {
   const txs = [...ctx.state.transactions].reverse().slice(0, HISTORY_LIMIT);
   if (!txs.length) return null;
-  const name = (id) => store.getAccount(id)?.name ?? '(conta excluída)';
-  return h('section', { class: 'card' },
-    h('h3', {}, 'Movimentações recentes'),
-    h('ul', { class: 'list' }, txs.map((t) => {
-      const route = t.from && t.to ? `${name(t.from)} → ${name(t.to)}` : name(t.from || t.to);
-      const sign = t.type === 'transfer' || t.type === 'contribution' ? '' : t.to ? '+' : '−';
-      const value = t.type === 'adjust' ? `${t.amount > 0 ? '+' : '−'}${formatBRL(Math.abs(t.amount))}` : `${sign}${formatBRL(t.amount)}`;
-      return h('li', { class: 'row between tx' },
+  const name = (id) => store.getAccount(id)?.name ?? 'conta excluída';
+  return [
+    h('h2', { class: 'section-label' }, 'Movimentações'),
+    h('section', { class: 'card flush' }, h('ul', { class: 'list' }, txs.map((t) => {
+      const isMove = t.type === 'transfer' || t.type === 'contribution';
+      const credit = t.type === 'adjust' ? t.amount > 0 : !!t.to && !t.from;
+      const value = isMove ? formatBRL(t.amount) : `${credit ? '+' : '−'}${formatBRL(Math.abs(t.amount))}`;
+      const route = isMove ? `${name(t.from)} → ${name(t.to)}` : name(t.from || t.to);
+      return h('li', { class: 'row-item' },
         h('span', { class: 'li-main' },
-          h('span', {}, t.desc || TYPE_LABEL[t.type]),
-          h('span', { class: 'li-sub' }, `${formatShort(t.date)} · ${TYPE_LABEL[t.type]} · ${route}`)),
-        h('span', { class: 'row gap-sm' },
-          h('strong', { class: sign === '+' || (t.type === 'adjust' && t.amount > 0) ? 'pos' : '' }, value),
+          h('span', { class: 'li-title' }, t.desc || TYPE_LABEL[t.type]),
+          h('span', { class: 'li-sub' }, `${formatShort(t.date)} · ${route}`)),
+        h('span', { class: 'li-end' },
+          h('span', { class: `li-value ${credit && !isMove ? 'pos' : ''}` }, value),
           h('button', {
             class: 'icon-btn', 'aria-label': 'Excluir movimentação',
             onclick: async () => {
-              if (await confirmDialog('Excluir movimentação?', 'O saldo das contas volta ao que era antes dela.', 'Excluir', true)) {
+              if (await confirmDialog('Excluir movimentação?', 'Os saldos voltam ao que eram antes dela.', 'Excluir', true)) {
                 store.deleteTransaction(t.id);
                 toast('Movimentação excluída');
               }
             },
-          }, '✕')));
-    })));
+          }, icon('trash', { size: 18 }))));
+    }))),
+  ];
 }
 
 export function renderAccounts(ctx) {
@@ -60,13 +64,17 @@ export function renderAccounts(ctx) {
   const goal = ctx.state.accounts.filter((a) => a.kind === 'goal');
   const total = spending.reduce((s, a) => s + a.balance, 0);
   return h('div', { class: 'screen accounts' },
-    h('header', { class: 'screen-head' }, h('h1', {}, 'Contas')),
-    h('section', { class: 'card summary' },
-      h('p', { class: 'muted small' }, 'Dinheiro gastável (contas de gasto)'),
-      h('p', { class: `big ${total < 0 ? 'neg' : ''}` }, formatBRL(total))),
+    h('header', { class: 'screen-head' },
+      h('h1', {}, 'Contas'),
+      h('p', { class: 'sub' }, 'Confira com o banco e ajuste quando precisar')),
+    h('section', { class: 'card' },
+      h('div', { class: 'stat' },
+        h('span', { class: 'stat-label' }, 'Total para gastar'),
+        h('span', { class: `stat-value ${total < 0 ? 'neg' : ''}`, style: 'font-size:1.75rem' }, formatBRL(total)))),
+    h('h2', { class: 'section-label' }, 'Contas de gasto'),
     spending.map((a) => accountCard(ctx, a)),
-    goal.length > 0 && h('h2', { class: 'section-title' }, 'Fora do orçamento'),
+    goal.length > 0 && h('h2', { class: 'section-label' }, 'Fora do orçamento'),
     goal.map((a) => accountCard(ctx, a)),
-    h('button', { class: 'btn ghost block', onclick: () => editAccount() }, '+ Nova conta'),
+    h('section', { class: 'card flush' }, addButton('Nova conta', () => editAccount())),
     history(ctx));
 }

@@ -130,3 +130,11 @@ test('sem salário cadastrado usa a próxima receita; sem receitas, 30 dias', ()
   assert.equal(b.nextSalary, null);
   assert.equal(b.days, 30);
 });
+
+test('projeção: arredondamento do orçamento não vira saldo negativo', async () => {
+  const { projectBalance } = await import('../js/core/projection.js');
+  const s = scenario();
+  const b = computeDailyBudget(s, TODAY);
+  const p = projectBalance(s, TODAY, b).points.find((x) => x.date === b.horizonEnd);
+  assert.equal(p.spending, 0); // 2.379 − 14 × 169,93 = −0,02 → 0
+});

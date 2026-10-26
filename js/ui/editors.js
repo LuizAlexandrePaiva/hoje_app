@@ -2,32 +2,34 @@
 // despesas fixas, metas e aportes. Usados no assistente inicial e em Ajustes.
 
 import { h, sheet, toast, confirmDialog } from './dom.js';
+import { icon } from './icons.js';
 import * as store from '../data/store.js';
 import { formatBRL, formatBRLShort, parseBRL, toInput } from '../core/money.js';
-import { todayISO, formatFull, isValidISO } from '../core/dates.js';
+import { todayISO, formatFull, formatShort, formatDayMonth, isValidISO } from '../core/dates.js';
 
 // ---------- campos ----------
 
 export function field(label, input, hint) {
+  const control = input.dataset?.money ? h('span', { class: 'money' }, input) : input;
   return h('label', { class: 'field' },
     h('span', { class: 'field-label' }, label),
-    input,
+    control,
     hint && h('span', { class: 'field-hint' }, hint));
 }
 
 export function moneyInput(cents, attrs = {}) {
   return h('input', {
-    type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '0,00',
+    type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '0,00', 'data-money': '1',
     value: cents == null ? '' : toInput(cents), ...attrs,
   });
 }
 
 function textInput(value, attrs = {}) {
-  return h('input', { type: 'text', value: value ?? '', autocomplete: 'off', ...attrs });
+  return h('input', { type: 'text', value: value ?? '', autocomplete: 'off', autocapitalize: 'sentences', ...attrs });
 }
 
 function numberInput(value, attrs = {}) {
-  return h('input', { type: 'number', inputmode: 'numeric', value: value ?? '', ...attrs });
+  return h('input', { type: 'text', inputmode: 'numeric', pattern: '[0-9]*', value: value ?? '', ...attrs });
 }
 
 function dateInput(value, attrs = {}) {
@@ -38,9 +40,38 @@ function select(options, value) {
   return h('select', {}, options.map(([v, label]) => h('option', { value: v, selected: v === value || undefined }, label)));
 }
 
-function checkbox(label, checked) {
-  const input = h('input', { type: 'checkbox', checked });
-  return { input, el: h('label', { class: 'check' }, input, h('span', {}, label)) };
+/** Linha com chave liga/desliga: título + explicação curta. */
+export function switchRow(title, sub, checked) {
+  const input = h('input', { type: 'checkbox', role: 'switch', checked });
+  const el = h('label', { class: 'switch-row' },
+    h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, title), sub && h('span', { class: 'li-sub' }, sub)),
+    h('span', { class: 'switch' }, input, h('span')));
+  return { el, input };
+}
+
+/** Controle segmentado (2–3 opções). */
+function segmented(options, value, onChange) {
+  let current = value;
+  const buttons = options.map(([v, label]) => h('button', {
+    type: 'button', 'aria-pressed': String(v === value),
+    onclick: () => {
+      current = v;
+      buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(options[i][0] === v)));
+      onChange?.(v);
+    },
+  }, label));
+  return { el: h('div', { class: 'segmented', role: 'group' }, buttons), get value() { return current; } };
+}
+
+/** Campo numérico curto alinhado à direita do rótulo. */
+export function inlineField(title, input, sub) {
+  return h('label', { class: 'inline-field' },
+    h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, title), sub && h('span', { class: 'li-sub' }, sub)),
+    input);
+}
+
+function more(label, ...children) {
+  return h('details', { class: 'more' }, h('summary', {}, label), h('div', {}, ...children));
 }
 
 function errorBox() {
@@ -52,15 +83,15 @@ function fail(box, msg) {
   return false;
 }
 
-function actions(onDelete) {
-  return h('div', { class: 'row gap form-actions' },
-    onDelete && h('button', { type: 'button', class: 'btn ghost danger-text', onclick: onDelete }, 'Excluir'),
-    h('button', { type: 'submit', class: 'btn primary grow' }, 'Salvar'));
+function actions(onDelete, saveLabel = 'Salvar') {
+  return h('div', { class: 'form-actions' },
+    onDelete && h('button', { type: 'button', class: 'btn danger-text', onclick: onDelete }, icon('trash', { size: 20 }), 'Excluir'),
+    h('button', { type: 'submit', class: 'btn primary' }, saveLabel));
 }
 
 function form(onSubmit, ...children) {
   return h('form', {
-    class: 'form',
+    class: 'form', novalidate: true,
     onsubmit: (e) => { e.preventDefault(); onSubmit(); },
   }, ...children);
 }
@@ -70,11 +101,17 @@ const accountOptions = (state, kind) =>
 
 // ---------- contas ----------
 
+const KIND_HINT = {
+  spending: 'Entra no orçamento do dia.',
+  goal: 'Fica fora do orçamento (metas e investimentos).',
+};
+
 export function editAccount(account) {
   const isNew = !account;
   const a = account || { name: '', kind: 'spending', balance: 0 };
   const name = textInput(a.name, { placeholder: 'Ex.: Conta corrente' });
-  const kind = select([['spending', 'Conta de gasto (entra no orçamento)'], ['goal', 'Conta de meta / investimento (fora do orçamento)']], a.kind);
+  const kindHint = h('span', { class: 'field-hint' }, KIND_HINT[a.kind]);
+  const kind = segmented([['spending', 'De gasto'], ['goal', 'De meta']], a.kind, (v) => { kindHint.textContent = KIND_HINT[v]; });
   const balance = moneyInput(isNew ? null : a.balance);
   const err = errorBox();
   sheet(isNew ? 'Nova conta' : 'Editar conta', (close) => form(() => {
@@ -89,14 +126,15 @@ export function editAccount(account) {
     close();
   },
   field('Nome', name),
-  field('Tipo', kind),
-  isNew ? field('Saldo atual', balance, 'Pode ser negativo (ex.: -50).')
-    : h('p', { class: 'muted small' }, `Saldo: ${formatBRL(a.balance)} — para mudar, use “Ajustar saldo” em Contas.`),
+  h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Tipo'), kind.el, kindHint),
+  isNew
+    ? field('Saldo hoje', balance, 'Negativo? Use o sinal de menos.')
+    : h('p', { class: 'field-hint' }, `Saldo atual: ${formatBRL(a.balance)}. Para corrigir, use “Ajustar” na aba Contas.`),
   err,
   actions(!isNew && (async () => {
     const uses = store.accountUsage(a.id);
-    if (uses.length) return fail(err, `Esta conta é usada por: ${uses.join(', ')}. Altere-os antes.`);
-    if (await confirmDialog('Excluir conta?', `“${a.name}” será removida. As movimentações antigas continuam no histórico.`, 'Excluir', true)) {
+    if (uses.length) return fail(err, `Em uso por: ${uses.join(', ')}.`);
+    if (await confirmDialog('Excluir conta?', `“${a.name}” sai da lista. O histórico continua.`, 'Excluir', true)) {
       store.remove('accounts', a.id);
     }
   }))));
@@ -107,24 +145,24 @@ export function editAccount(account) {
 function exceptionsEditor(exceptions = {}) {
   const rows = h('div', { class: 'stack-sm' });
   const addRow = (month = '', cents = null) => {
-    const m = h('input', { type: 'month', value: month });
-    const v = moneyInput(cents);
-    const row = h('div', { class: 'row gap exc-row' }, m, v,
-      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Remover', onclick: () => row.remove() }, '✕'));
+    const m = h('input', { type: 'month', value: month, 'aria-label': 'Mês' });
+    const v = moneyInput(cents, { 'aria-label': 'Valor no mês' });
+    const row = h('div', { class: 'exc-row' }, m, h('span', { class: 'money' }, v),
+      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Remover exceção', onclick: () => row.remove() }, icon('close', { size: 18 })));
     row._read = () => ({ month: m.value, cents: parseBRL(v.value) });
     rows.append(row);
   };
   Object.entries(exceptions).sort().forEach(([mk, c]) => addRow(mk, c));
   const el = h('div', { class: 'field' },
-    h('span', { class: 'field-label' }, 'Valor diferente em um mês específico'),
+    h('span', { class: 'field-label' }, 'Valor diferente em um mês'),
     rows,
-    h('button', { type: 'button', class: 'btn small ghost', onclick: () => addRow() }, '+ Adicionar exceção'));
+    h('button', { type: 'button', class: 'btn-add', onclick: () => addRow() }, icon('plus', { size: 18 }), 'Adicionar mês'));
   const read = () => {
     const out = {};
     for (const row of rows.children) {
       const { month, cents } = row._read();
       if (!month) continue;
-      if (Number.isNaN(cents)) throw new Error(`Valor inválido na exceção de ${month}.`);
+      if (Number.isNaN(cents)) throw new Error('Confira o valor das exceções.');
       out[month] = cents;
     }
     return out;
@@ -136,13 +174,13 @@ function exceptionsEditor(exceptions = {}) {
 
 export function describeRule(rule) {
   if (!rule) return '';
-  if (rule.type === 'businessDay') return `${rule.n}º dia útil${rule.countSaturday ? ' (sábado conta)' : ''}`;
-  return `todo dia ${rule.day}`;
+  if (rule.type === 'businessDay') return `${rule.n}º dia útil`;
+  return `Dia ${rule.day}`;
 }
 
 export function editIncome(income) {
   const state = store.getState();
-  if (!state.accounts.length) return toast('Cadastre uma conta primeiro.');
+  if (!state.accounts.length) return toast('Cadastre uma conta antes.');
   const isNew = !income;
   const i = income || {
     name: '', amount: null, accountId: state.settings.defaultAccountId || state.accounts[0].id,
@@ -151,21 +189,20 @@ export function editIncome(income) {
   const name = textInput(i.name, { placeholder: 'Ex.: Salário' });
   const amount = moneyInput(i.amount);
   const account = select(accountOptions(state), i.accountId);
-  const salary = checkbox('É o meu salário (o orçamento vai até a véspera dele)', i.isSalary);
-  const ruleType = select([['businessDay', 'Nº dia útil do mês'], ['fixedDay', 'Dia fixo do mês']], i.rule.type);
-  const n = numberInput(i.rule.type === 'businessDay' ? i.rule.n : 5, { min: 1, max: 23 });
-  const day = numberInput(i.rule.type === 'fixedDay' ? i.rule.day : 10, { min: 1, max: 31 });
-  const sat = checkbox('Contar sábado como dia útil (se cair no sábado, paga na sexta)', i.rule.countSaturday);
+  const n = numberInput(i.rule.type === 'businessDay' ? i.rule.n : 5, { maxlength: 2, 'aria-label': 'Qual dia útil' });
+  const day = numberInput(i.rule.type === 'fixedDay' ? i.rule.day : 10, { maxlength: 2, 'aria-label': 'Dia do mês' });
+  const sat = switchRow('Sábado conta como dia útil', 'Se cair no sábado, recebe na sexta.', i.rule.countSaturday);
+  const salary = switchRow('É o salário', 'O orçamento vai até a véspera dele.', i.isSalary);
   const since = dateInput(i.since || todayISO());
   const exc = exceptionsEditor(i.exceptions);
-  const nField = field('Qual dia útil', n);
-  const dayField = field('Dia do mês', day, 'Em meses mais curtos, cai no último dia.');
-  const sync = () => {
-    const bd = ruleType.value === 'businessDay';
-    nField.hidden = !bd; sat.el.hidden = !bd; dayField.hidden = bd;
+  const nRow = inlineField('Qual dia útil', n, 'Desconta fins de semana e feriados.');
+  const dayRow = inlineField('Dia do mês', day, 'Em meses curtos, o último dia.');
+  const sync = (type) => {
+    const bd = type === 'businessDay';
+    nRow.hidden = !bd; sat.el.hidden = !bd; dayRow.hidden = bd;
   };
-  ruleType.addEventListener('change', sync);
-  sync();
+  const ruleType = segmented([['businessDay', 'Dia útil'], ['fixedDay', 'Dia fixo']], i.rule.type, sync);
+  sync(i.rule.type);
   const err = errorBox();
   sheet(isNew ? 'Nova receita' : 'Editar receita', (close) => form(() => {
     if (!name.value.trim()) return fail(err, 'Dê um nome à receita.');
@@ -174,9 +211,9 @@ export function editIncome(income) {
     const rule = ruleType.value === 'businessDay'
       ? { type: 'businessDay', n: Number(n.value), countSaturday: sat.input.checked }
       : { type: 'fixedDay', day: Number(day.value) };
-    if (rule.type === 'businessDay' && !(rule.n >= 1 && rule.n <= 23)) return fail(err, 'Dia útil deve ser de 1 a 23.');
-    if (rule.type === 'fixedDay' && !(rule.day >= 1 && rule.day <= 31)) return fail(err, 'Dia deve ser de 1 a 31.');
-    if (!isValidISO(since.value)) return fail(err, 'Data inicial inválida.');
+    if (rule.type === 'businessDay' && !(rule.n >= 1 && rule.n <= 23)) return fail(err, 'O dia útil vai de 1 a 23.');
+    if (rule.type === 'fixedDay' && !(rule.day >= 1 && rule.day <= 31)) return fail(err, 'O dia vai de 1 a 31.');
+    if (!isValidISO(since.value)) return fail(err, 'Confira a data de início.');
     let exceptions;
     try { exceptions = exc.read(); } catch (e) { return fail(err, e.message); }
     store.upsert('incomes', {
@@ -186,16 +223,13 @@ export function editIncome(income) {
     close();
   },
   field('Nome', name),
-  field('Valor padrão', amount),
-  field('Cai na conta', account),
-  salary.el,
-  field('Quando cai', ruleType),
-  nField, sat.el, dayField,
-  exc.el,
-  field('Considerar a partir de', since, 'Ocorrências antes desta data são ignoradas (já recebidas).'),
+  h('div', { class: 'field-row' }, field('Valor', amount), field('Cai em', account)),
+  h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Quando cai'), ruleType.el),
+  nRow, dayRow, sat.el, salary.el,
+  more('Mais opções', exc.el, field('Contar a partir de', since, 'Datas anteriores são ignoradas.')),
   err,
   actions(!isNew && (async () => {
-    if (await confirmDialog('Excluir receita?', `“${i.name}” deixará de ser prevista.`, 'Excluir', true)) store.remove('incomes', i.id);
+    if (await confirmDialog('Excluir receita?', `“${i.name}” deixa de ser prevista.`, 'Excluir', true)) store.remove('incomes', i.id);
   }))));
 }
 
@@ -204,13 +238,13 @@ export function editIncome(income) {
 export function editExpense(expense) {
   const state = store.getState();
   const spending = accountOptions(state, 'spending');
-  if (!spending.length) return toast('Cadastre uma conta de gasto primeiro.');
+  if (!spending.length) return toast('Cadastre uma conta de gasto antes.');
   const isNew = !expense;
   const e = expense || { name: '', amount: null, accountId: state.settings.defaultAccountId, day: 10, exceptions: {}, since: todayISO() };
   const name = textInput(e.name, { placeholder: 'Ex.: Fatura do cartão' });
   const amount = moneyInput(e.amount);
   const account = select(spending, e.accountId);
-  const day = numberInput(e.day, { min: 1, max: 31 });
+  const day = numberInput(e.day, { maxlength: 2, 'aria-label': 'Dia do vencimento' });
   const since = dateInput(e.since || todayISO());
   const exc = exceptionsEditor(e.exceptions);
   const err = errorBox();
@@ -219,22 +253,20 @@ export function editExpense(expense) {
     const v = parseBRL(amount.value);
     if (Number.isNaN(v) || v < 0) return fail(err, 'Informe o valor.');
     const d = Number(day.value);
-    if (!(d >= 1 && d <= 31)) return fail(err, 'Dia deve ser de 1 a 31.');
-    if (!isValidISO(since.value)) return fail(err, 'Data inicial inválida.');
+    if (!(d >= 1 && d <= 31)) return fail(err, 'O dia vai de 1 a 31.');
+    if (!isValidISO(since.value)) return fail(err, 'Confira a data de início.');
     let exceptions;
     try { exceptions = exc.read(); } catch (x) { return fail(err, x.message); }
     store.upsert('expenses', { ...e, name: name.value.trim(), amount: v, accountId: account.value, day: d, exceptions, since: since.value });
     close();
   },
   field('Nome', name),
-  field('Valor', amount),
-  field('Debitada da conta', account),
-  field('Dia do vencimento', day),
-  exc.el,
-  field('Considerar a partir de', since, 'Use uma data depois do vencimento se a deste mês já foi paga.'),
+  h('div', { class: 'field-row' }, field('Valor', amount), field('Sai de', account)),
+  inlineField('Dia do vencimento', day),
+  more('Mais opções', exc.el, field('Contar a partir de', since, 'Já pagou a deste mês? Use uma data após o vencimento.')),
   err,
   actions(!isNew && (async () => {
-    if (await confirmDialog('Excluir despesa?', `“${e.name}” deixará de ser prevista.`, 'Excluir', true)) store.remove('expenses', e.id);
+    if (await confirmDialog('Excluir despesa?', `“${e.name}” deixa de ser prevista.`, 'Excluir', true)) store.remove('expenses', e.id);
   }))));
 }
 
@@ -243,7 +275,7 @@ export function editExpense(expense) {
 export function editGoal(goal) {
   const state = store.getState();
   const goalAccounts = accountOptions(state, 'goal');
-  if (!goalAccounts.length) return toast('Cadastre antes uma conta do tipo “meta / investimento”.');
+  if (!goalAccounts.length) return toast('Crie antes uma conta do tipo “de meta”.');
   const isNew = !goal;
   const g = goal || { name: '', target: null, deadline: '', accountId: goalAccounts[0][0] };
   const name = textInput(g.name, { placeholder: 'Ex.: Viagem' });
@@ -254,18 +286,17 @@ export function editGoal(goal) {
   sheet(isNew ? 'Nova meta' : 'Editar meta', (close) => form(() => {
     if (!name.value.trim()) return fail(err, 'Dê um nome à meta.');
     const v = parseBRL(target.value);
-    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor alvo.');
-    if (!isValidISO(deadline.value)) return fail(err, 'Informe a data alvo.');
+    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe quanto quer juntar.');
+    if (!isValidISO(deadline.value)) return fail(err, 'Informe o prazo.');
     store.upsert('goals', { ...g, name: name.value.trim(), target: v, deadline: deadline.value, accountId: account.value });
     close();
   },
   field('Nome', name),
-  field('Valor alvo', target),
-  field('Até', deadline),
+  h('div', { class: 'field-row' }, field('Quanto juntar', target), field('Até', deadline)),
   field('Conta da meta', account, 'O progresso é o saldo desta conta.'),
   err,
   actions(!isNew && (async () => {
-    if (await confirmDialog('Excluir meta?', `“${g.name}” e seus aportes planejados serão removidos.`, 'Excluir', true)) store.remove('goals', g.id);
+    if (await confirmDialog('Excluir meta?', `“${g.name}” e os aportes planejados serão removidos.`, 'Excluir', true)) store.remove('goals', g.id);
   }))));
 }
 
@@ -278,21 +309,20 @@ export function editContribution(contribution, goalId) {
   const date = dateInput(c.date);
   const from = select(accountOptions(state, 'spending'), c.fromAccountId);
   const err = errorBox();
-  const settled = state.settled[`contribution:${c.id}`];
-  sheet(isNew ? `Aporte em ${goal?.name ?? 'meta'}` : 'Editar aporte', (close) => form(() => {
+  const done = state.settled[`contribution:${c.id}`];
+  sheet(isNew ? 'Planejar aporte' : 'Editar aporte', (close) => form(() => {
     const v = parseBRL(amount.value);
     if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.');
     if (!isValidISO(date.value)) return fail(err, 'Informe a data.');
     store.upsert('contributions', { ...c, amount: v, date: date.value, fromAccountId: from.value });
     close();
   },
-  settled && h('p', { class: 'muted small' }, 'Este aporte já foi feito. Para desfazer, exclua a movimentação em Contas.'),
-  field('Valor', amount),
-  field('Data', date),
-  field('Sai da conta', from),
+  h('p', { class: 'sheet-lead' }, done ? 'Este aporte já foi feito. Para desfazer, exclua a movimentação em Contas.' : `Para ${goal?.name ?? 'a meta'}. Já sai do orçamento na data.`),
+  h('div', { class: 'field-row' }, field('Valor', amount), field('Data', date)),
+  field('Sai de', from),
   err,
   actions(!isNew && (async () => {
-    if (await confirmDialog('Excluir aporte planejado?', 'O aporte deixa de ser previsto.', 'Excluir', true)) store.remove('contributions', c.id);
+    if (await confirmDialog('Excluir aporte?', 'Ele deixa de ser previsto.', 'Excluir', true)) store.remove('contributions', c.id);
   }))));
 }
 
@@ -306,12 +336,12 @@ export function adjustSheet(account) {
     if (Number.isNaN(v)) return fail(err, 'Valor inválido.');
     const t = store.adjustBalance(account.id, v);
     close();
-    if (t) toast(`Saldo ajustado (${t.amount > 0 ? '+' : ''}${formatBRL(t.amount)})`);
+    toast(t ? `Saldo ajustado (${t.amount > 0 ? '+' : '−'}${formatBRL(Math.abs(t.amount))})` : 'Saldo já estava certo');
   },
-  h('p', { class: 'muted small' }, 'Informe o saldo que aparece no banco agora. A diferença fica registrada como ajuste.'),
+  h('p', { class: 'sheet-lead' }, 'Digite o saldo que o banco mostra agora.'),
   field('Saldo real', balance),
   err,
-  h('button', { type: 'submit', class: 'btn primary block' }, 'Salvar saldo')));
+  actions(null, 'Salvar saldo')));
 }
 
 export function transferSheet({ from, to, amount, title = 'Transferir', desc = '', note } = {}) {
@@ -329,106 +359,113 @@ export function transferSheet({ from, to, amount, title = 'Transferir', desc = '
     close();
     toast(`${formatBRL(v)} transferidos`);
   },
-  note && h('p', { class: 'muted small' }, note),
+  h('p', { class: 'sheet-lead' }, note || 'Transferências não contam como gasto.'),
   field('Valor', value),
-  field('De', fromSel),
-  field('Para', toSel),
-  h('p', { class: 'muted small' }, 'Transferência entre contas não é gasto.'),
+  h('div', { class: 'field-row' }, field('De', fromSel), field('Para', toSel)),
   err,
-  h('button', { type: 'submit', class: 'btn primary block' }, 'Confirmar transferência')));
+  actions(null, 'Confirmar')));
 }
 
-const CONFIRM_TITLES = { income: 'Recebeu?', expense: 'Pagou?', contribution: 'Fez o aporte?' };
+const CONFIRM = {
+  income: { title: 'Recebeu?', ok: 'Confirmar recebimento', skip: 'Não veio', where: 'Entra em' },
+  expense: { title: 'Pagou?', ok: 'Confirmar pagamento', skip: 'Pular este mês', where: 'Sai de' },
+  contribution: { title: 'Fez o aporte?', ok: 'Confirmar aporte', skip: 'Pular', where: 'Sai de' },
+};
 
 export function confirmOccurrenceSheet(event) {
   const today = todayISO();
+  const cfg = CONFIRM[event.kind];
   const amount = moneyInput(event.amount, { 'data-noautofocus': '1' });
   const date = dateInput(event.date <= today ? event.date : today, { max: today });
   const err = errorBox();
   const acc = store.getAccount(event.accountId);
-  const where = event.kind === 'income' ? `Entra em ${acc?.name ?? '—'}`
-    : event.kind === 'expense' ? `Sai de ${acc?.name ?? '—'}`
-      : `De ${acc?.name ?? '—'} para ${store.getAccount(event.toAccountId)?.name ?? '—'}`;
-  sheet(`${event.name} — ${CONFIRM_TITLES[event.kind]}`, (close) => form(() => {
+  sheet(`${event.name}: ${cfg.title.toLowerCase()}`, (close) => form(() => {
     const v = parseBRL(amount.value);
     if (Number.isNaN(v) || v < 0) return fail(err, 'Valor inválido.');
-    if (!isValidISO(date.value) || date.value > today) return fail(err, 'Data inválida.');
+    if (!isValidISO(date.value) || date.value > today) return fail(err, 'A data não pode ser futura.');
     store.confirmOccurrence(event, { amount: v, date: date.value });
     close();
     toast(`${event.name}: ${formatBRL(v)} registrado`);
   },
-  h('p', { class: 'muted small' }, `Previsto para ${formatFull(event.date)}. ${where}.`),
-  field('Valor', amount),
-  field('Data', date),
+  h('p', { class: 'sheet-lead' }, `Previsto para ${formatShort(event.date)} · ${cfg.where} ${acc?.name ?? '—'}. Ajuste se veio diferente.`),
+  h('div', { class: 'field-row' }, field('Valor', amount), field('Data', date)),
   err,
-  h('div', { class: 'row gap' },
+  h('div', { class: 'form-actions' },
     h('button', {
-      type: 'button', class: 'btn ghost grow',
-      onclick: () => { store.skipOccurrence(event); close(); toast('Marcado como “não veio este mês”'); },
-    }, event.kind === 'income' ? 'Não veio' : 'Pular este mês'),
-    h('button', { type: 'submit', class: 'btn primary grow' }, 'Confirmar'))));
+      type: 'button', class: 'btn',
+      onclick: () => { store.skipOccurrence(event); close(); toast(`${event.name}: marcado como não ocorrido`); },
+    }, cfg.skip),
+    h('button', { type: 'submit', class: 'btn primary' }, cfg.ok))));
 }
 
 // ---------- listas editáveis ----------
 
-function listCard(title, items, emptyText, onAdd, addLabel) {
-  return h('section', { class: 'card' },
-    h('div', { class: 'card-head' }, h('h3', {}, title)),
-    items.length ? h('ul', { class: 'list' }, items) : h('p', { class: 'muted small' }, emptyText),
-    h('button', { class: 'btn ghost block', onclick: onAdd }, addLabel));
+export function addButton(label, onclick) {
+  return h('button', { class: 'btn-add', onclick }, icon('plus', { size: 18 }), label);
 }
 
-function item(main, sub, value, onclick) {
+function listCard(title, items, emptyText, onAdd, addLabel) {
+  return h('section', { class: 'card flush' },
+    title && h('div', { class: 'card-head', style: 'padding-top:12px' }, h('h3', { class: 'card-title' }, title)),
+    items.length ? h('ul', { class: 'list' }, items) : h('p', { class: 'empty' }, emptyText),
+    addButton(addLabel, onAdd));
+}
+
+export function listItem(main, sub, value, onclick, badge) {
   return h('li', {},
     h('button', { class: 'list-item', onclick },
-      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, main), sub && h('span', { class: 'li-sub' }, sub)),
-      value != null && h('span', { class: 'li-value' }, value),
-      h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
+      h('span', { class: 'li-main' },
+        h('span', { class: 'row gap-sm' }, h('span', { class: 'li-title' }, main), badge),
+        sub && h('span', { class: 'li-sub' }, sub)),
+      h('span', { class: 'li-end' },
+        value != null && h('span', { class: 'li-value' }, value),
+        icon('chevron', { size: 18, cls: 'chev' }))));
 }
 
-export function accountsList(state) {
-  const roles = (a) => [
-    a.kind === 'goal' ? 'meta / investimento' : 'gasto',
-    a.id === state.settings.defaultAccountId && 'padrão dos gastos',
-    a.id === state.settings.reserveAccountId && 'reserva p/ resgates',
-  ].filter(Boolean).join(' · ');
-  return listCard('Contas',
-    state.accounts.map((a) => item(a.name, roles(a), formatBRL(a.balance), () => editAccount(a))),
-    'Nenhuma conta ainda.', () => editAccount(), '+ Adicionar conta');
+const accName = (state, id) => state.accounts.find((a) => a.id === id)?.name ?? '—';
+
+export function accountsList(state, title = 'Contas') {
+  const role = (a) => (a.id === state.settings.defaultAccountId ? 'Padrão dos gastos'
+    : a.id === state.settings.reserveAccountId ? 'Reserva' : null);
+  return listCard(title,
+    state.accounts.map((a) => listItem(a.name,
+      [a.kind === 'goal' ? 'De meta' : 'De gasto', role(a)].filter(Boolean).join(' · '),
+      formatBRL(a.balance), () => editAccount(a))),
+    'Nenhuma conta ainda.', () => editAccount(), 'Adicionar conta');
 }
 
-export function incomesList(state) {
-  const accName = (id) => state.accounts.find((a) => a.id === id)?.name ?? '—';
-  return listCard('Receitas',
-    state.incomes.map((i) => item(i.name + (i.isSalary ? ' ★' : ''), `${describeRule(i.rule)} · ${accName(i.accountId)}`,
-      formatBRLShort(i.amount), () => editIncome(i))),
-    'Nenhuma receita ainda.', () => editIncome(), '+ Adicionar receita');
+export function incomesList(state, title = 'Receitas') {
+  return listCard(title,
+    state.incomes.map((i) => listItem(i.name, `${describeRule(i.rule)} · ${accName(state, i.accountId)}`,
+      formatBRLShort(i.amount), () => editIncome(i), i.isSalary && h('span', { class: 'badge pos' }, 'Salário'))),
+    'Nenhuma receita ainda.', () => editIncome(), 'Adicionar receita');
 }
 
-export function expensesList(state) {
-  const accName = (id) => state.accounts.find((a) => a.id === id)?.name ?? '—';
-  return listCard('Despesas fixas',
-    state.expenses.map((e) => item(e.name, `todo dia ${e.day} · ${accName(e.accountId)}`, formatBRLShort(e.amount), () => editExpense(e))),
-    'Nenhuma despesa fixa.', () => editExpense(), '+ Adicionar despesa');
+export function expensesList(state, title = 'Despesas fixas') {
+  return listCard(title,
+    state.expenses.map((e) => listItem(e.name, `Dia ${e.day} · ${accName(state, e.accountId)}`, formatBRLShort(e.amount), () => editExpense(e))),
+    'Nenhuma despesa fixa.', () => editExpense(), 'Adicionar despesa');
 }
 
-export function goalsList(state) {
-  return listCard('Metas',
-    state.goals.map((g) => item(g.name, `até ${formatFull(g.deadline)}`, formatBRLShort(g.target), () => editGoal(g))),
-    'Nenhuma meta.', () => editGoal(), '+ Adicionar meta');
+export function goalsList(state, title = 'Metas') {
+  const year = Number(todayISO().slice(0, 4));
+  return listCard(title,
+    state.goals.map((g) => listItem(g.name, `Até ${formatDayMonth(g.deadline, year)}`, formatBRLShort(g.target), () => editGoal(g))),
+    'Nenhuma meta.', () => editGoal(), 'Adicionar meta');
 }
 
-export function contributionsList(state) {
+export function contributionsList(state, title = 'Aportes planejados') {
   const goals = new Map(state.goals.map((g) => [g.id, g]));
+  const year = Number(todayISO().slice(0, 4));
   const sorted = [...state.contributions].sort((a, b) => (a.date < b.date ? -1 : 1));
-  return listCard('Aportes planejados',
-    sorted.map((c) => item(goals.get(c.goalId)?.name ?? '—', formatFull(c.date), formatBRLShort(c.amount), () => editContribution(c))),
+  return listCard(title,
+    sorted.map((c) => listItem(goals.get(c.goalId)?.name ?? '—', formatDayMonth(c.date, year), formatBRLShort(c.amount), () => editContribution(c))),
     state.goals.length ? 'Nenhum aporte planejado.' : 'Crie uma meta para planejar aportes.',
-    () => (state.goals.length ? pickGoalThenContribution(state) : toast('Crie uma meta primeiro.')), '+ Planejar aporte');
+    () => (state.goals.length ? pickGoalThenContribution(state) : toast('Crie uma meta antes.')), 'Planejar aporte');
 }
 
 function pickGoalThenContribution(state) {
   if (state.goals.length === 1) return editContribution(null, state.goals[0].id);
   sheet('Para qual meta?', () => h('ul', { class: 'list' },
-    state.goals.map((g) => item(g.name, null, null, () => editContribution(null, g.id)))));
+    state.goals.map((g) => listItem(g.name, `Até ${formatFull(g.deadline)}`, null, () => editContribution(null, g.id)))));
 }

@@ -3,6 +3,7 @@ import { todayISO } from './core/dates.js';
 import { computeDailyBudget } from './core/budget.js';
 import { suggestRefill, suggestSurplus } from './core/refill.js';
 import { afterSheetClosed } from './ui/dom.js';
+import { iconSVG } from './ui/icons.js';
 import { renderToday } from './ui/screens/today.js';
 import { renderSpend } from './ui/screens/spend.js';
 import { renderTimeline } from './ui/screens/timeline.js';
@@ -63,6 +64,7 @@ function render() {
   main.dataset.route = route;
   window.scrollTo(0, keepScroll ? y : 0);
   tabbar.hidden = !state.setupDone || FULLSCREEN.has(route);
+  document.body.classList.toggle('no-tabbar', tabbar.hidden);
   for (const a of tabbar.querySelectorAll('a')) {
     a.classList.toggle('active', a.getAttribute('href') === route);
     if (a.getAttribute('href') === route) a.setAttribute('aria-current', 'page');
@@ -74,6 +76,8 @@ function render() {
 function checkDay() {
   if (todayISO() !== currentDay) render();
 }
+
+for (const a of tabbar.querySelectorAll('a[data-icon]')) a.insertAdjacentHTML('afterbegin', iconSVG(a.dataset.icon, 24));
 
 store.load();
 store.subscribe(render);

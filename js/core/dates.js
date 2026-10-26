@@ -67,13 +67,38 @@ export function isValidISO(s) {
   return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth(y, m);
 }
 
-const fmtShort = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
-const fmtLong = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
-const fmtFull = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+const WEEKDAYS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
-export function formatShort(s) { return fmtShort.format(new Date(toUTC(s))); }
-export function formatLong(s) { return fmtLong.format(new Date(toUTC(s))); }
-export function formatFull(s) { return fmtFull.format(new Date(toUTC(s))); }
+/** 26/10 */
+export function formatShort(s) {
+  const { m, d } = parts(s);
+  return `${pad(d)}/${pad(m)}`;
+}
+
+/** 27/11/2026 */
+export function formatFull(s) {
+  const { y, m, d } = parts(s);
+  return `${pad(d)}/${pad(m)}/${y}`;
+}
+
+/** "seg, 9 de nov" */
+export function formatLong(s) {
+  const { m, d } = parts(s);
+  return `${WEEKDAYS[weekday(s)].slice(0, 3)}, ${d} de ${MONTHS[m - 1].slice(0, 3)}`;
+}
+
+/** "segunda, 26 de outubro" */
+export function formatHeader(s) {
+  const { m, d } = parts(s);
+  return `${WEEKDAYS[weekday(s)]}, ${d} de ${MONTHS[m - 1]}`;
+}
+
+/** "27 de nov de 2026" (ano só quando diferente do de referência) */
+export function formatDayMonth(s, refYear) {
+  const { y, m, d } = parts(s);
+  return `${d} de ${MONTHS[m - 1].slice(0, 3)}${refYear && y !== refYear ? ` de ${y}` : ''}`;
+}
 
 /** "hoje", "amanhã", "em 3 dias", "há 2 dias" */
 export function relative(today, s) {

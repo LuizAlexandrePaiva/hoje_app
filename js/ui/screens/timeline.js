@@ -9,8 +9,8 @@ import { flowInto } from '../../core/schedule.js';
 import * as store from '../../data/store.js';
 
 const W = 360;
-const H = 220;
-const PAD = { l: 8, r: 8, t: 26, b: 28 };
+const H = 200;
+const PAD = { l: 8, r: 8, t: 22, b: 24 };
 
 function niceTicks(min, max, count = 4) {
   const span = max - min || 1;
@@ -21,8 +21,6 @@ function niceTicks(min, max, count = 4) {
   for (let v = Math.ceil(min / step) * step; v <= max; v += step) ticks.push(v);
   return ticks;
 }
-
-const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function compactBRL(cents) {
   const v = cents / 100 + 0; // + 0 transforma -0 em 0
@@ -50,80 +48,81 @@ function chart(ctx, proj) {
   // grade recessiva + rótulos do eixo y
   for (const t of niceTicks(min, max)) {
     root.append(svg('line', { x1: PAD.l, x2: W - PAD.r, y1: y(t), y2: y(t), class: t === 0 ? 'zero' : 'grid' }));
-    root.append(svg('text', { x: PAD.l + 2, y: y(t) - 3, class: 'axis' }, compactBRL(t)));
+    root.append(svg('text', { x: PAD.l + 2, y: y(t) - 4, class: 'axis' }, compactBRL(t)));
   }
 
   // marcador do próximo salário
   const salIdx = ctx.budget.nextSalary ? pts.findIndex((p) => p.date === ctx.budget.nextSalary.date) : -1;
   if (salIdx >= 0) {
-    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: PAD.t - 6, y2: PAD.t + ih, class: 'salary-line' }));
-    root.append(svg('text', { x: x(salIdx), y: PAD.t - 10, class: 'axis strong', 'text-anchor': 'middle' }, ctx.budget.nextSalary.name));
+    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: PAD.t - 4, y2: PAD.t + ih, class: 'salary-line' }));
+    root.append(svg('text', { x: x(salIdx), y: PAD.t - 8, class: 'axis strong', 'text-anchor': 'middle' }, ctx.budget.nextSalary.name));
   }
 
   root.append(svg('path', { d: path('events'), class: 'line s1' }));
   root.append(svg('path', { d: path('spending'), class: 'line s2' }));
 
-  // marcas dos dias de recebimento (▲, em cima da linha) e pagamento (▼)
+  // dias de recebimento (▲ acima da linha) e de pagamento (▼ abaixo)
   pts.forEach((p, i) => {
-    const hasIn = p.dayEvents.some((e) => flowInto(e, ids) > 0);
-    const hasOut = p.dayEvents.some((e) => flowInto(e, ids) < 0);
+    const flows = p.dayEvents.map((e) => flowInto(e, ids));
     const cx = x(i);
     const cy = y(p.events);
-    if (hasIn) root.append(svg('path', { d: `M${cx - 5},${cy - 6}L${cx + 5},${cy - 6}L${cx},${cy - 14}Z`, class: 'mk in' }));
-    if (hasOut) root.append(svg('path', { d: `M${cx - 5},${cy + 6}L${cx + 5},${cy + 6}L${cx},${cy + 14}Z`, class: 'mk out' }));
+    if (flows.some((f) => f > 0)) root.append(svg('path', { d: `M${cx - 5},${cy - 6}L${cx + 5},${cy - 6}L${cx},${cy - 14}Z`, class: 'mk in' }));
+    if (flows.some((f) => f < 0)) root.append(svg('path', { d: `M${cx - 5},${cy + 6}L${cx + 5},${cy + 6}L${cx},${cy + 14}Z`, class: 'mk out' }));
   });
 
-  // eixo x: início, salário e fim
+  // eixo x: hoje, salário e fim
   const labels = new Map([[0, 'hoje'], [pts.length - 1, formatShort(pts[pts.length - 1].date)]]);
   if (salIdx > 0 && salIdx < pts.length - 6) labels.set(salIdx, formatShort(pts[salIdx].date));
   for (const [i, t] of labels) {
     root.append(svg('text', {
-      x: x(i), y: H - 8, class: 'axis',
+      x: x(i), y: H - 6, class: 'axis',
       'text-anchor': i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle',
     }, t));
   }
 
-  // camada de hover: linha vertical + tooltip com as duas séries
-  const cross = svg('line', { y1: PAD.t, y2: PAD.t + ih, class: 'cross', visibility: 'hidden' });
-  const dot1 = svg('circle', { r: 4, class: 'dot s1', visibility: 'hidden' });
-  const dot2 = svg('circle', { r: 4, class: 'dot s2', visibility: 'hidden' });
+  // seleção: linha vertical + pontos; os valores aparecem no painel acima
+  const cross = svg('line', { y1: PAD.t, y2: PAD.t + ih, class: 'cross' });
+  const dot1 = svg('circle', { r: 4.5, class: 'dot s1' });
+  const dot2 = svg('circle', { r: 4.5, class: 'dot s2' });
   root.append(cross, dot1, dot2);
-  const tip = h('div', { class: 'tip', hidden: true });
-  const wrap = h('div', { class: 'chart-wrap' }, root, tip);
 
-  const show = (clientX) => {
-    const r = root.getBoundingClientRect();
-    const sx = ((clientX - r.left) / r.width) * W;
-    const i = Math.max(0, Math.min(pts.length - 1, Math.round(((sx - PAD.l) / iw) * (pts.length - 1))));
+  const rDate = h('p', { class: 'readout-date' });
+  const rV1 = h('span', { class: 'v' });
+  const rV2 = h('span', { class: 'v' });
+  const rEvents = h('p', { class: 'readout-events' });
+  const readout = h('div', { class: 'readout', 'aria-live': 'polite' },
+    rDate,
+    h('div', { class: 'readout-rows' },
+      h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Só com as contas previstas'), rV1,
+      h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Gastando o limite diário'), rV2),
+    rEvents);
+
+  const select = (i) => {
     const p = pts[i];
-    for (const el of [cross, dot1, dot2]) el.setAttribute('visibility', 'visible');
-    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i));
+    for (const el of [cross]) { el.setAttribute('x1', x(i)); el.setAttribute('x2', x(i)); }
     dot1.setAttribute('cx', x(i)); dot1.setAttribute('cy', y(p.events));
     dot2.setAttribute('cx', x(i)); dot2.setAttribute('cy', y(p.spending));
-    tip.replaceChildren(
-      h('strong', {}, capitalize(formatLong(p.date))),
-      h('div', { class: 'tip-row' }, h('i', { class: 'sw s1' }), 'Só compromissos ', h('b', {}, formatBRL(p.events))),
-      h('div', { class: 'tip-row' }, h('i', { class: 'sw s2' }), 'Gastando o orçamento ', h('b', {}, formatBRL(p.spending))),
-      ...p.dayEvents.map((e) => h('div', { class: 'tip-ev' }, `${e.kind === 'income' ? '▲' : '▼'} ${e.name} ${formatBRLShort(e.amount)}`)));
-    tip.hidden = false;
-    const left = (x(i) / W) * r.width;
-    tip.style.left = `${Math.min(Math.max(left, 70), r.width - 70)}px`;
+    rDate.textContent = `${formatLong(p.date)} · ${relative(ctx.today, p.date)}`;
+    rV1.textContent = formatBRL(p.events);
+    rV2.textContent = formatBRL(p.spending);
+    rV2.classList.toggle('neg', p.spending < 0);
+    rEvents.textContent = p.dayEvents.map((e) => `${e.kind === 'income' ? '▲' : '▼'} ${e.name} ${formatBRLShort(e.amount)}`).join('   ');
   };
-  const hide = () => {
-    for (const el of [cross, dot1, dot2]) el.setAttribute('visibility', 'hidden');
-    tip.hidden = true;
+  const pick = (clientX) => {
+    const r = root.getBoundingClientRect();
+    const sx = ((clientX - r.left) / r.width) * W;
+    select(Math.max(0, Math.min(pts.length - 1, Math.round(((sx - PAD.l) / iw) * (pts.length - 1)))));
   };
-  root.addEventListener('pointermove', (e) => show(e.clientX));
-  root.addEventListener('pointerdown', (e) => show(e.clientX));
-  root.addEventListener('pointerleave', hide);
+  root.addEventListener('pointermove', (e) => pick(e.clientX));
+  root.addEventListener('pointerdown', (e) => pick(e.clientX));
+  // começa mostrando a véspera do salário (o ponto mais apertado do período)
+  select(Math.max(0, pts.findIndex((p) => p.date === ctx.budget.horizonEnd)));
 
-  return wrap;
+  return { readout, chart: h('div', { class: 'chart-wrap' }, root) };
 }
 
 function legend() {
   return h('div', { class: 'legend' },
-    h('span', {}, h('i', { class: 'sw s1' }), 'Só compromissos'),
-    h('span', {}, h('i', { class: 'sw s2 dashed' }), 'Gastando o orçamento diário'),
     h('span', {}, h('i', { class: 'tri in' }, '▲'), 'Recebimento'),
     h('span', {}, h('i', { class: 'tri out' }, '▼'), 'Pagamento'));
 }
@@ -134,28 +133,33 @@ function eventList(ctx, proj) {
     if (!groups.has(e.effectiveDate)) groups.set(e.effectiveDate, []);
     groups.get(e.effectiveDate).push(e);
   }
+  if (!groups.size) return h('p', { class: 'empty' }, 'Nada previsto para o período.');
   const accName = (id) => store.getAccount(id)?.name ?? '—';
-  if (!groups.size) return h('p', { class: 'muted' }, 'Nenhum evento previsto.');
-  return h('ol', { class: 'events' }, [...groups].map(([date, evs]) => h('li', {},
-    h('div', { class: 'ev-date' }, h('strong', {}, capitalize(formatLong(date))), h('span', { class: 'muted small' }, relative(ctx.today, date))),
-    h('ul', {}, evs.map((e) => h('li', { class: 'ev row between' },
-      h('span', {}, e.name, h('span', { class: 'muted small' },
-        e.kind === 'income' ? ` → ${accName(e.accountId)}` : e.kind === 'expense' ? ` · ${accName(e.accountId)}` : ` · de ${accName(e.accountId)}`,
-        e.overdue ? ` · atrasado (${formatShort(e.date)})` : '')),
-      h('strong', { class: e.kind === 'income' ? 'pos' : e.kind === 'expense' ? 'neg' : '' },
-        `${e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)}`)))))));
+  const sub = (e) => {
+    const where = e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
+    return e.overdue ? `${where} · atrasado desde ${formatShort(e.date)}` : where;
+  };
+  return h('div', {}, [...groups].map(([date, evs]) => h('div', { class: 'day-group' },
+    h('div', { class: 'day-head' }, h('strong', {}, formatLong(date)), h('span', { class: 'muted' }, relative(ctx.today, date))),
+    evs.map((e) => h('div', { class: 'ev' },
+      h('span', { class: `ev-dot ${e.kind === 'income' ? 'in' : 'out'}` }),
+      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), h('span', { class: 'li-sub' }, sub(e))),
+      h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` },
+        `${e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)}`))))));
 }
 
 export function renderTimeline(ctx) {
   const proj = projectBalance(ctx.state, ctx.today, ctx.budget);
-  const last = proj.points[proj.points.length - 1];
+  const c = chart(ctx, proj);
   return h('div', { class: 'screen timeline' },
-    h('header', { class: 'screen-head' }, h('h1', {}, 'Linha do tempo')),
+    h('header', { class: 'screen-head' },
+      h('h1', {}, 'Linha do tempo'),
+      h('p', { class: 'sub' }, `Saldo das contas de gasto até ${formatShort(proj.end)}`)),
     h('section', { class: 'card' },
-      h('p', { class: 'muted small' }, `Saldo projetado das contas de gasto até ${formatShort(proj.end)}`),
+      c.readout,
+      c.chart,
       legend(),
-      chart(ctx, proj),
-      h('p', { class: 'muted small' }, 'Toque no gráfico para ver cada dia. ',
-        `Em ${formatShort(last.date)}: ${formatBRL(last.events)} sem gastos do dia a dia.`)),
-    h('section', { class: 'card' }, h('h3', {}, 'Próximos eventos'), eventList(ctx, proj)));
+      h('p', { class: 'caption' }, 'Toque e arraste no gráfico para ver cada dia.')),
+    h('h2', { class: 'section-label' }, 'Próximos eventos'),
+    h('section', { class: 'card flush' }, eventList(ctx, proj)));
 }

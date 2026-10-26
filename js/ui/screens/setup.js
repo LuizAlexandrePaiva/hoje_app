@@ -2,59 +2,60 @@
 // e parâmetros. Cada passo salva no aparelho, então dá para fechar e voltar.
 
 import { h, toast, confirmDialog } from '../dom.js';
+import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { accountsList, incomesList, expensesList, goalsList, contributionsList } from '../editors.js';
-import { refillSettings } from './settings.js';
+import { refillSettings, importButton } from './settings.js';
+
+const tip = (text) => h('p', { class: 'tip' }, icon('check', { size: 18 }), h('span', {}, text));
 
 const STEPS = [
-  { title: 'Bem-vindo ao Hoje', render: welcome },
+  { render: welcome, next: 'Começar' },
   {
     title: 'Suas contas',
-    intro: 'Cadastre as contas com o saldo de hoje. “Contas de gasto” formam o dinheiro do orçamento (ex.: conta corrente e um CDB de liquidez diária). Contas de meta/investimento ficam fora.',
-    render: (s) => [accountsList(s)],
+    lead: 'Cadastre cada conta com o saldo de hoje.',
+    tips: ['De gasto: conta corrente, CDB de liquidez diária…', 'De meta: dinheiro guardado, fora do orçamento.'],
+    render: (s) => [accountsList(s, null)],
     valid: (s) => s.accounts.some((a) => a.kind === 'spending') || 'Cadastre pelo menos uma conta de gasto.',
   },
   {
-    title: 'Receitas',
-    intro: 'Tudo que entra todo mês: salário, aluguéis… Marque o salário com “É o meu salário” — o orçamento vai até a véspera dele. Cada receita só entra no saldo quando você confirma “Recebeu?”.',
-    render: (s) => [incomesList(s)],
+    title: 'O que entra',
+    lead: 'Receitas que se repetem todo mês.',
+    tips: ['Marque o salário: o orçamento vai até a véspera dele.', 'Nada entra no saldo antes de você confirmar.'],
+    render: (s) => [incomesList(s, null)],
   },
   {
-    title: 'Despesas fixas',
-    intro: 'Compromissos mensais que saem de uma conta de gasto (ex.: fatura do cartão). Eles são reservados antes de calcular o seu orçamento diário.',
-    render: (s) => [expensesList(s)],
+    title: 'O que sai',
+    lead: 'Contas fixas, como a fatura do cartão.',
+    tips: ['Elas são reservadas antes do seu limite diário.'],
+    render: (s) => [expensesList(s, null)],
   },
   {
-    title: 'Metas (opcional)',
-    intro: 'Uma meta usa uma conta de meta/investimento. Aportes planejados saem de uma conta de gasto na data marcada e já são descontados do orçamento.',
+    title: 'Metas',
+    lead: 'Opcional. Dá para criar depois.',
+    tips: ['Aportes planejados já saem do orçamento na data.'],
     render: (s) => [goalsList(s), contributionsList(s)],
   },
   {
     title: 'Resgates',
-    intro: 'Escolha a conta onde os gastos acontecem e a reserva de onde vêm os resgates. O app avisa quando for hora de resgatar.',
+    lead: 'De onde saem os gastos e de onde vem o dinheiro quando a conta baixar.',
     render: (s) => [refillSettings(s)],
+    next: 'Concluir',
   },
 ];
 
 function welcome() {
-  const fileInput = h('input', { type: 'file', accept: 'application/json,.json', hidden: true });
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-    try {
-      store.importJSON(await file.text());
-      toast('Backup importado');
-    } catch (e) {
-      toast(`Não foi possível importar: ${e.message}`);
-    }
-  });
+  const feature = (ico, title, sub) => h('li', {}, icon(ico, { size: 22 }),
+    h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, title), h('span', { class: 'li-sub' }, sub)));
   return [
     h('div', { class: 'welcome' },
-      h('img', { src: 'icons/icon-192.png', alt: '', width: 96, height: 96 }),
-      h('p', {}, 'O Hoje diz quanto você pode gastar hoje sem faltar dinheiro até o próximo salário.'),
-      h('p', { class: 'muted small' }, 'Seus dados ficam só neste aparelho. Nada é enviado para servidores.')),
-    h('button', { class: 'btn ghost block', onclick: () => fileInput.click() }, 'Já tenho um backup (importar JSON)'),
-    fileInput,
+      h('img', { src: 'icons/icon-192.png', alt: '', width: 88, height: 88 }),
+      h('h1', {}, 'Hoje'),
+      h('p', { class: 'lead' }, 'Quanto você pode gastar hoje sem faltar dinheiro até o salário.')),
+    h('ul', { class: 'features card' },
+      feature('sun', 'Limite do dia', 'Recalculado todo dia com o saldo real.'),
+      feature('transfer', 'Hora de resgatar', 'Avisa quando a conta precisa de reforço.'),
+      feature('wallet', 'Só no seu aparelho', 'Funciona offline. Nada vai para servidores.')),
   ];
 }
 
@@ -68,7 +69,7 @@ export function renderSetup(ctx) {
     const ok = cur.valid ? cur.valid(state) : true;
     if (ok !== true) return toast(ok);
     if (step === 2 && !state.incomes.some((i) => i.isSalary)
-      && !(await confirmDialog('Nenhum salário marcado', 'Sem salário, o orçamento usa a próxima receita (ou 30 dias). Continuar mesmo assim?', 'Continuar'))) return;
+      && !(await confirmDialog('Nenhum salário marcado', 'Sem salário, o orçamento usa a próxima receita (ou 30 dias).', 'Seguir assim'))) return;
     if (last) {
       store.finishSetup();
       ctx.navigate('#/hoje', { replace: true });
@@ -79,12 +80,16 @@ export function renderSetup(ctx) {
   };
 
   return h('div', { class: 'screen setup' },
-    h('div', { class: 'steps', 'aria-label': `Passo ${step + 1} de ${STEPS.length}` },
-      STEPS.map((_, i) => h('span', { class: i <= step ? 'on' : '' }))),
-    h('header', { class: 'screen-head' }, h('h1', {}, cur.title)),
-    cur.intro && h('p', { class: 'muted' }, cur.intro),
+    step > 0 && h('div', { class: 'steps', 'aria-hidden': 'true' }, STEPS.slice(1).map((_, i) => h('span', { class: i < step ? 'on' : '' }))),
+    step > 0 && h('p', { class: 'step-count' }, `Passo ${step} de ${STEPS.length - 1}`),
+    cur.title && h('header', { class: 'screen-head' }, h('h1', {}, cur.title), cur.lead && h('p', { class: 'sub' }, cur.lead)),
+    cur.tips && h('div', { class: 'stack-sm' }, cur.tips.map(tip)),
     cur.render(state),
-    h('div', { class: 'row gap setup-nav' },
-      step > 0 && h('button', { class: 'btn ghost grow', onclick: () => store.setSetupStep(step - 1) }, 'Voltar'),
-      h('button', { class: 'btn primary grow', onclick: next }, step === 0 ? 'Começar' : last ? 'Concluir' : 'Continuar')));
+    step === 0
+      ? h('div', { class: 'setup-nav column' },
+        h('button', { class: 'btn primary xl', onclick: next }, cur.next),
+        importButton('Já tenho um backup', 'btn quiet', false))
+      : h('div', { class: 'setup-nav' },
+        h('button', { class: 'btn', onclick: () => store.setSetupStep(step - 1) }, 'Voltar'),
+        h('button', { class: 'btn primary', onclick: next }, cur.next || 'Continuar')));
 }

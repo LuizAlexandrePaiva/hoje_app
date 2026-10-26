@@ -1,7 +1,7 @@
 // Service worker: cache-first para os arquivos do app (funciona 100% offline
 // depois da primeira visita). Ao publicar mudanças, aumente CACHE_VERSION.
 
-const CACHE_VERSION = '1.1.0';
+const CACHE_VERSION = '1.2.0';
 const CACHE = `hoje-${CACHE_VERSION}`;
 
 const APP_FILES = [
@@ -26,6 +26,7 @@ const APP_FILES = [
   './js/data/ledger.js',
   './js/data/store.js',
   './js/ui/dom.js',
+  './js/ui/icons.js',
   './js/ui/editors.js',
   './js/ui/screens/today.js',
   './js/ui/screens/spend.js',

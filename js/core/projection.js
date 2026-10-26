@@ -27,12 +27,10 @@ export function projectBalance(state, today, budget) {
       dayEvents.push(events[i]);
       i++;
     }
-    points.push({
-      date: day,
-      events: budget.spendableNow + cumulative,
-      spending: budget.spendableStart + cumulative - budget.dailyBudget * (k + 1),
-      dayEvents,
-    });
+    let spending = budget.spendableStart + cumulative - budget.dailyBudget * (k + 1);
+    // o orçamento é arredondado ao centavo; esse resto não é saldo negativo de verdade
+    if (spending < 0 && spending > -(k + 1)) spending = 0;
+    points.push({ date: day, events: budget.spendableNow + cumulative, spending, dayEvents });
   }
   return { points, events, end };
 }

@@ -1,8 +1,9 @@
 // Lançar gasto: teclado numérico grande, só o valor (descrição opcional).
 
 import { h, toast, sheet } from '../dom.js';
+import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
-import { formatBRL } from '../../core/money.js';
+import { formatBRL, formatBRLShort } from '../../core/money.js';
 import { computeDailyBudget } from '../../core/budget.js';
 import { suggestRefill } from '../../core/refill.js';
 import { todayISO } from '../../core/dates.js';
@@ -10,15 +11,35 @@ import { refillSheet } from './today.js';
 
 const MAX_DIGITS = 9;
 
+function warnNegative(accountId) {
+  const s = store.getState();
+  const acc = store.getAccount(accountId);
+  if (!acc || acc.balance >= 0 || accountId !== s.settings.defaultAccountId) return;
+  const today = todayISO();
+  const refill = suggestRefill(s, today, computeDailyBudget(s, today));
+  const reserve = store.getAccount(refill.fromAccountId);
+  setTimeout(() => sheet(`${acc.name} ficou negativa`, (close) => [
+    h('div', { class: 'stats' },
+      h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Saldo agora'), h('span', { class: 'stat-value neg' }, formatBRL(acc.balance))),
+      refill.amount > 0 && h('div', { class: 'stat right' }, h('span', { class: 'stat-label' }, 'Resgate sugerido'), h('span', { class: 'stat-value' }, formatBRLShort(refill.amount)))),
+    h('p', { class: 'sheet-lead' }, refill.amount > 0
+      ? `Traga o valor de ${reserve?.name} para cobrir o saldo e os próximos dias.`
+      : 'Não há saldo na reserva para resgatar.'),
+    h('div', { class: 'form-actions' },
+      h('button', { class: 'btn grow', onclick: close }, 'Agora não'),
+      refill.amount > 0 && h('button', { class: 'btn warn grow', onclick: () => refillSheet({ refill }) }, 'Resgatar')),
+  ]), 350);
+}
+
 export function renderSpend(ctx) {
   const state = ctx.state;
   let text = ''; // o que foi digitado, ex.: "12,5"
   let accountId = state.settings.defaultAccountId;
 
   const display = h('p', { class: 'amount-display', 'aria-live': 'polite' });
-  const after = h('p', { class: 'muted small center' });
-  const desc = h('input', { type: 'text', placeholder: 'Descrição (opcional)', class: 'desc-input', maxlength: 60, autocomplete: 'off' });
-  const confirmBtn = h('button', { class: 'btn primary xl block', disabled: true, onclick: save }, 'Confirmar gasto');
+  const hint = h('p', { class: 'amount-hint' });
+  const desc = h('input', { type: 'text', placeholder: 'Descrição (opcional)', maxlength: 60, autocomplete: 'off', 'aria-label': 'Descrição' });
+  const confirmBtn = h('button', { class: 'btn primary xl block', disabled: true, onclick: save });
 
   const cents = () => {
     if (!text) return 0;
@@ -31,11 +52,12 @@ export function renderSpend(ctx) {
     display.textContent = formatBRL(v);
     display.classList.toggle('empty', v === 0);
     confirmBtn.disabled = v <= 0;
-    const remaining = ctx.budget.remainingToday - v;
-    after.textContent = v > 0
-      ? `Restante hoje após o gasto: ${formatBRL(remaining)}`
-      : `Restante hoje: ${formatBRL(ctx.budget.remainingToday)}`;
-    after.classList.toggle('neg', v > 0 && remaining < 0);
+    confirmBtn.textContent = v > 0 ? `Lançar ${formatBRL(v)}` : 'Digite o valor';
+    const left = ctx.budget.remainingToday - v;
+    hint.textContent = v === 0
+      ? `Restante hoje: ${formatBRL(ctx.budget.remainingToday)}`
+      : left >= 0 ? `Sobram ${formatBRL(left)} hoje` : `Passa ${formatBRL(-left)} do limite de hoje`;
+    hint.classList.toggle('neg', v > 0 && left < 0);
   }
 
   function press(key) {
@@ -59,33 +81,18 @@ export function renderSpend(ctx) {
     toast(`Gasto de ${formatBRL(v)} lançado`, {
       label: 'Desfazer', run: () => { store.deleteTransaction(t.id); toast('Gasto desfeito'); },
     });
-    const s = store.getState();
-    const acc = store.getAccount(accountId);
-    if (acc && acc.balance < 0 && accountId === s.settings.defaultAccountId) {
-      const today = todayISO();
-      const budget = computeDailyBudget(s, today);
-      const refill = suggestRefill(s, today, budget);
-      setTimeout(() => sheet(`${acc.name} ficou negativo`, (close) => [
-        h('p', {}, `Saldo agora: `, h('strong', { class: 'neg' }, formatBRL(acc.balance)), '.'),
-        refill.amount > 0
-          ? h('p', { class: 'muted' }, `Sugestão: resgatar ${formatBRL(refill.amount)} de ${store.getAccount(refill.fromAccountId)?.name}.`)
-          : h('p', { class: 'muted' }, 'Não há saldo na reserva para resgatar.'),
-        h('div', { class: 'row gap' },
-          h('button', { class: 'btn ghost grow', onclick: close }, 'Agora não'),
-          refill.amount > 0 && h('button', { class: 'btn warn grow', onclick: () => refillSheet({ refill }) }, 'Registrar resgate')),
-      ]), 350);
-    }
+    warnNegative(accountId);
   }
 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'];
   const pad = h('div', { class: 'keypad' }, keys.map((k) => h('button', {
-    class: `key ${k === 'del' ? 'key-del' : ''}`,
-    'aria-label': k === 'del' ? 'Apagar' : k,
+    class: `key ${k === 'del' || k === ',' ? 'key-fn' : ''}`,
+    'aria-label': k === 'del' ? 'Apagar' : k === ',' ? 'Vírgula' : k,
     onclick: () => press(k),
-  }, k === 'del' ? '⌫' : k)));
+  }, k === 'del' ? icon('backspace', { size: 26 }) : k)));
 
   const spending = state.accounts.filter((a) => a.kind === 'spending');
-  const chips = spending.length > 1 && h('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Conta' },
+  const chips = spending.length > 1 && h('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Sai de' },
     spending.map((a) => {
       const chip = h('button', {
         class: `chip ${a.id === accountId ? 'on' : ''}`, role: 'radio', 'aria-checked': String(a.id === accountId),
@@ -110,13 +117,13 @@ export function renderSpend(ctx) {
 
   update();
   return h('div', { class: 'screen spend' },
-    h('header', { class: 'screen-head' },
-      h('button', { class: 'icon-btn', 'aria-label': 'Voltar', onclick: () => ctx.navigate('#/hoje', { replace: true }) }, '←'),
-      h('h1', {}, 'Lançar gasto'), h('span')),
-    display,
-    after,
-    chips,
-    desc,
+    h('header', { class: 'topbar' },
+      h('button', { class: 'icon-btn', 'aria-label': 'Voltar', onclick: () => ctx.navigate('#/hoje', { replace: true }) }, icon('back', { size: 24 })),
+      h('h1', {}, 'Novo gasto'), h('span')),
+    h('div', { class: 'amount-area' }, display, hint),
+    h('div', { class: 'spend-opts' },
+      chips && h('div', { class: 'row gap' }, h('span', { class: 'chips-label' }, 'Sai de'), chips),
+      desc),
     pad,
     confirmBtn);
 }
