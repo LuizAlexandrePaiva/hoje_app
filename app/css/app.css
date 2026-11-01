@@ -467,3 +467,12 @@ html, body, .main { overflow-x: clip; }
 
 /* campo de nome com sugestões: sem a seta de lista (parece um seletor no Android) */
 input[list]::-webkit-calendar-picker-indicator { display: none !important; }
+
+/* Hoje: lançar gasto (principal) e receita lado a lado */
+.cta-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.cta-row .btn.xl:not(.primary) { padding: 10px 20px; }
+
+/* lançar: alternância gasto/receita no topo e valor de receita em verde */
+.topbar .mode-toggle { justify-self: center; width: min(240px, 100%); }
+.amount-display.income:not(.empty) { color: var(--pos); }
+.spend-opts .row.gap-sm > input { flex: 1; min-width: 0; }

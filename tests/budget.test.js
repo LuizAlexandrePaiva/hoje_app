@@ -166,3 +166,13 @@ test('receita antecipada para dentro do período conta a partir da nova data', (
   const b = computeDailyBudget(s, TODAY);
   assert.equal(b.dailyBudget, Math.round((237900 + 135000) / 14));
 });
+
+test('receita única agendada no meio do período entra a partir da data dela', () => {
+  const s = scenario();
+  s.incomes.push({ id: 'freela', name: 'Freela', amount: 80000, accountId: 'cc', rule: { type: 'once', date: '2026-11-03' } });
+  // até 2/11 (8 dias) só o saldo; até 8/11 (14 dias) com o freela: (2.379 + 800) ÷ 14
+  assert.equal(computeDailyBudget(s, TODAY).dailyBudget, Math.round((237900 + 80000) / 14));
+  // agendada para depois do salário não muda o limite de agora
+  s.incomes.at(-1).rule.date = '2026-11-20';
+  assert.equal(computeDailyBudget(s, TODAY).dailyBudget, 16993);
+});

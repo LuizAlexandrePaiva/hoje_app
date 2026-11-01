@@ -7,7 +7,7 @@ import { nthBusinessDay } from './businessDays.js';
 
 /** Data prevista de uma receita/despesa num mês, ou null. */
 export function ruleDate(rule, y, m) {
-  if (!rule) return null;
+  if (!rule || rule.type === 'once') return null;
   if (rule.type === 'businessDay') {
     return nthBusinessDay(y, m, rule.n, { countSaturday: !!rule.countSaturday });
   }
@@ -52,6 +52,26 @@ function monthly(item, kind, from, to, moved) {
   return out;
 }
 
+/** Receita agendada uma única vez (rule.type === 'once'). */
+function once(item, from, to, moved) {
+  const key = `income:${item.id}:unica`;
+  const original = item.rule.date;
+  const date = moved[key] || original;
+  if (!original || date < from || date > to) return [];
+  return [{
+    key,
+    kind: 'income',
+    sourceId: item.id,
+    name: item.name,
+    date,
+    originalDate: original,
+    amount: item.amount,
+    accountId: item.accountId,
+    isSalary: !!item.isSalary,
+    once: true,
+  }];
+}
+
 /**
  * Todas as ocorrências (liquidadas ou não) com data em [from, to].
  * kind: 'income' (crédito em accountId), 'expense' (débito de accountId),
@@ -62,7 +82,7 @@ export function expandOccurrences(state, from, to) {
   const moved = state.moved || {};
   for (const inc of state.incomes || []) {
     if (inc.active === false) continue;
-    out.push(...monthly(inc, 'income', from, to, moved));
+    out.push(...(inc.rule?.type === 'once' ? once(inc, from, to, moved) : monthly(inc, 'income', from, to, moved)));
   }
   for (const exp of state.expenses || []) {
     if (exp.active === false) continue;

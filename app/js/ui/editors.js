@@ -1,7 +1,7 @@
 // Formulários (em folha modal) e listas editáveis de contas, receitas,
 // despesas fixas, metas e aportes. Usados no assistente inicial e em Ajustes.
 
-import { h, sheet, toast, confirmDialog } from './dom.js';
+import { h, sheet, toast, confirmDialog, afterSheetClosed } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
 import { formatBRL, formatBRLShort, parseBRL, toInput } from '../core/money.js';
@@ -176,17 +176,26 @@ function exceptionsEditor(exceptions = {}) {
 export function describeRule(rule) {
   if (!rule) return '';
   if (rule.type === 'businessDay') return `${rule.n}º dia útil`;
+  if (rule.type === 'once') return `Uma vez, ${formatDayMonth(rule.date, yearOf(todayISO()))}`;
   return `Dia ${rule.day}`;
 }
 
-export function editIncome(income) {
+/**
+ * Formulário de receita. `draft` pré-preenche uma receita nova (por exemplo,
+ * agendar uma receita única a partir da tela de lançamento); `onSaved` roda após salvar.
+ */
+export function editIncome(income, { draft, onSaved } = {}) {
   const state = store.getState();
   if (!state.accounts.length) return toast('Cadastre uma conta antes.');
   const isNew = !income;
+  const today = todayISO();
   const i = income || {
     name: '', amount: null, accountId: state.settings.defaultAccountId || state.accounts[0].id,
-    isSalary: false, rule: { type: 'businessDay', n: 5, countSaturday: false }, exceptions: {}, since: todayISO(),
+    isSalary: false, rule: { type: 'businessDay', n: 5, countSaturday: false }, exceptions: {}, since: today,
+    ...draft,
   };
+  const onceDate = dateInput(i.rule.type === 'once' ? i.rule.date : addDays(today, 1), { min: today, 'data-noautofocus': '1' });
+  const onceRow = field('Data', onceDate, 'Entra no limite do dia a partir dessa data.');
   const name = textInput(i.name, { placeholder: 'Ex.: Salário' });
   const amount = moneyInput(i.amount);
   const account = select(accountOptions(state), i.accountId);
@@ -198,18 +207,37 @@ export function editIncome(income) {
   const exc = exceptionsEditor(i.exceptions);
   const nRow = inlineField('Qual dia útil', n, 'Desconta fins de semana e feriados.');
   const dayRow = inlineField('Dia do mês', day, 'Em meses curtos, o último dia.');
+  const moreOpts = more('Mais opções', exc.el, field('Contar a partir de', since, 'Datas anteriores são ignoradas.'));
+  const recurring = [salary.el, moreOpts];
   const sync = (type) => {
-    const bd = type === 'businessDay';
-    nRow.hidden = !bd; sat.el.hidden = !bd; dayRow.hidden = bd;
+    nRow.hidden = type !== 'businessDay';
+    sat.el.hidden = type !== 'businessDay';
+    dayRow.hidden = type !== 'fixedDay';
+    onceRow.hidden = type !== 'once';
+    // salário, exceções e "a partir de" só fazem sentido para receitas que se repetem
+    for (const el of recurring) el.hidden = type === 'once';
   };
-  const ruleType = segmented([['businessDay', 'Dia útil'], ['fixedDay', 'Dia fixo']], i.rule.type, sync);
+  const ruleType = segmented([['businessDay', 'Dia útil'], ['fixedDay', 'Dia fixo'], ['once', 'Uma vez']], i.rule.type, sync);
   sync(i.rule.type);
   const err = errorBox();
-  sheet(isNew ? 'Nova receita' : 'Editar receita', (close) => form(() => {
+  sheet(isNew ? (i.rule.type === 'once' ? 'Agendar receita' : 'Nova receita') : 'Editar receita', (close) => form(() => {
     if (!name.value.trim()) return fail(err, 'Dê um nome à receita.');
     const v = parseBRL(amount.value);
     if (Number.isNaN(v) || v < 0) return fail(err, 'Informe o valor.');
-    const rule = ruleType.value === 'businessDay'
+    const type = ruleType.value;
+    if (type === 'once') {
+      const d = onceDate.value;
+      const changed = isNew || i.rule.type !== 'once' || d !== i.rule.date;
+      if (!isValidISO(d)) return fail(err, 'Escolha a data.');
+      if (changed && d < today) return fail(err, 'Para receita que já caiu, use “Lançar” e escolha Receita.');
+      const saved = store.upsert('incomes', {
+        ...i, name: name.value.trim(), amount: v, accountId: account.value,
+        isSalary: false, rule: { type: 'once', date: d }, exceptions: {},
+      });
+      if (onSaved) afterSheetClosed(() => onSaved(saved)); else close();
+      return;
+    }
+    const rule = type === 'businessDay'
       ? { type: 'businessDay', n: Number(n.value), countSaturday: sat.input.checked }
       : { type: 'fixedDay', day: Number(day.value) };
     if (rule.type === 'businessDay' && !(rule.n >= 1 && rule.n <= 23)) return fail(err, 'O dia útil vai de 1 a 23.');
@@ -217,17 +245,17 @@ export function editIncome(income) {
     if (!isValidISO(since.value)) return fail(err, 'Confira a data de início.');
     let exceptions;
     try { exceptions = exc.read(); } catch (e) { return fail(err, e.message); }
-    store.upsert('incomes', {
+    const saved = store.upsert('incomes', {
       ...i, name: name.value.trim(), amount: v, accountId: account.value,
       isSalary: salary.input.checked, rule, exceptions, since: since.value,
     });
-    close();
+    if (onSaved) afterSheetClosed(() => onSaved(saved)); else close();
   },
   field('Nome', name),
   h('div', { class: 'field-row' }, field('Valor', amount), field('Cai em', account)),
   h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Quando cai'), ruleType.el),
-  nRow, dayRow, sat.el, salary.el,
-  more('Mais opções', exc.el, field('Contar a partir de', since, 'Datas anteriores são ignoradas.')),
+  nRow, dayRow, onceRow, sat.el, salary.el,
+  moreOpts,
   err,
   actions(!isNew && (async () => {
     if (await confirmDialog('Excluir receita?', `“${i.name}” deixa de ser prevista.`, 'Excluir', true)) store.remove('incomes', i.id);
@@ -525,19 +553,20 @@ export const TX_LABEL = {
 };
 const txTime = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: TIME_ZONE });
 
-/** <datalist> com os nomes de gastos já usados (sugestões ao digitar). */
-export function spendNameList(id) {
-  return h('datalist', { id }, store.recentSpendNames().map((n) => h('option', { value: n })));
+/** <datalist> com os nomes já usados em gastos ou receitas (sugestões ao digitar). */
+export function nameList(id, type = 'spend') {
+  return h('datalist', { id }, store.recentNames(type).map((n) => h('option', { value: n })));
 }
 
 /** Ficha de um lançamento: mostra valor e origem, permite renomear e excluir. */
 export function transactionSheet(t) {
   const label = TX_LABEL[t.type] || 'Lançamento';
   const isSpend = t.type === 'spend';
-  const listId = 'nomes-gastos-ficha';
+  const suggest = isSpend || t.type === 'income';
+  const listId = 'nomes-ficha';
   const name = textInput(t.desc || '', {
-    placeholder: isSpend ? 'Ex.: Mercado, Almoço' : label, maxlength: store.NAME_MAX,
-    list: isSpend ? listId : null, enterkeyhint: 'done', 'data-noautofocus': '1',
+    placeholder: isSpend ? 'Ex.: Mercado, Almoço' : t.type === 'income' ? 'Ex.: Freela, Venda' : label, maxlength: store.NAME_MAX,
+    list: suggest ? listId : null, enterkeyhint: 'done', 'data-noautofocus': '1',
   });
   const acc = (id) => store.getAccount(id)?.name ?? 'conta excluída';
   const isMove = t.type === 'transfer' || t.type === 'contribution';
@@ -555,7 +584,7 @@ export function transactionSheet(t) {
     h('span', { class: 'stat-label' }, `${when}, ${where}`),
     h('span', { class: 'stat-value', style: 'font-size:1.75rem', 'data-fit': true }, formatBRL(Math.abs(t.amount)))),
   field('Nome', name),
-  isSpend && spendNameList(listId),
+  suggest && nameList(listId, t.type),
   actions(async () => {
     const title = isSpend ? 'Excluir gasto?' : 'Excluir movimentação?';
     const msg = isSpend ? 'O valor volta para o saldo da conta.' : 'Os saldos voltam ao que eram antes dela.';

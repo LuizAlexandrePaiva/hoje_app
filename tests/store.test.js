@@ -49,5 +49,20 @@ test('sugestões: nomes de gastos recentes, sem repetir e sem outros lançamento
   store.addSpend(300, 'café');
   store.addSpend(400, '');
   store.transfer('cdb', 'cc', 5000, 'Resgate');
-  assert.deepEqual(store.recentSpendNames(), ['café', 'Mercado']);
+  assert.deepEqual(store.recentNames('spend'), ['café', 'Mercado']);
+});
+
+test('receita avulsa entra no saldo na hora, não conta como gasto e tem sugestões próprias', async () => {
+  const { computeDailyBudget } = await import('../app/js/core/budget.js');
+  const before = computeDailyBudget(store.getState(), '2026-10-26');
+  store.addIncome(42000, 'Freela', 'cc');
+  const s = store.getState();
+  assert.equal(s.accounts.find((a) => a.id === 'cc').balance, 6400 + 42000);
+  const after = computeDailyBudget(s, '2026-10-26');
+  assert.equal(after.spentToday, 0);
+  assert.equal(after.dailyBudget, Math.round((237900 + 42000) / 14));
+  assert.ok(after.dailyBudget > before.dailyBudget);
+  store.addSpend(1000, 'Café');
+  assert.deepEqual(store.recentNames('income'), ['Freela']);
+  assert.deepEqual(store.recentNames('spend'), ['Café']);
 });

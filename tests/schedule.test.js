@@ -61,3 +61,23 @@ test('data mudada para outro mês continua na mesma ocorrência', () => {
     ['expense:fatura:2026-12', '2026-12-25'],
   ]);
 });
+
+test('receita única: aparece só na data, vira pendência e some ao confirmar', () => {
+  const s = scenario();
+  s.incomes.push({ id: 'freela', name: 'Freela', amount: 80000, accountId: 'cc', rule: { type: 'once', date: '2026-11-03' } });
+  const ev = expandOccurrences(s, TODAY, '2027-03-31').filter((e) => e.sourceId === 'freela');
+  assert.deepEqual(ev.map((e) => [e.key, e.date]), [['income:freela:unica', '2026-11-03']]);
+  assert.equal(pendingConfirmations(s, '2026-11-02').some((e) => e.sourceId === 'freela'), false);
+  assert.ok(pendingConfirmations(s, '2026-11-04').some((e) => e.sourceId === 'freela'));
+  s.settled['income:freela:unica'] = { date: '2026-11-03', amount: 80000 };
+  assert.equal(openEvents(s, '2026-11-04', '2027-03-31').some((e) => e.sourceId === 'freela'), false);
+});
+
+test('receita única com data mudada', () => {
+  const s = scenario();
+  s.incomes.push({ id: 'freela', name: 'Freela', amount: 80000, accountId: 'cc', rule: { type: 'once', date: '2026-11-03' } });
+  s.moved = { 'income:freela:unica': '2026-11-10' };
+  const [e] = expandOccurrences(s, TODAY, '2026-11-30').filter((x) => x.sourceId === 'freela');
+  assert.equal(e.date, '2026-11-10');
+  assert.equal(e.originalDate, '2026-11-03');
+});

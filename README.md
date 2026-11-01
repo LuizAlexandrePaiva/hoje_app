@@ -50,9 +50,9 @@ O app foi feito para uso com uma mão no celular: um número grande, um botão p
 ## Funcionalidades
 
 - **Quanto resta hoje:** o número em destaque é o que ainda pode ser gasto hoje. Logo abaixo aparece o limite diário, calculado para não faltar dinheiro até a véspera do próximo salário. No dia seguinte, sobras e excessos se redistribuem.
-- **Lançamento rápido:** teclado numérico, só o valor; nome e conta são opcionais. O nome sugere os já usados e pode ser trocado depois, tocando no gasto.
+- **Lançamento rápido de gastos e receitas:** teclado numérico, só o valor; nome e conta são opcionais. Uma receita lançada entra no saldo na hora e aumenta o limite do dia. O nome sugere os já usados e pode ser trocado depois, tocando no lançamento.
 - **Resgates planejados:** mostra quantos dias o saldo da conta de gastos cobre e sugere quanto resgatar da reserva (por exemplo, um CDB de liquidez diária), arredondado e limitado ao saldo disponível. Também sugere aplicar o excedente quando sobra dinheiro.
-- **Receitas recorrentes:** dia fixo ou Nº dia útil do mês, com feriados nacionais (Sexta-feira Santa calculada pela Páscoa), opção de contar sábado e valor diferente em meses específicos.
+- **Receitas recorrentes e únicas:** dia fixo ou Nº dia útil do mês, com feriados nacionais (Sexta-feira Santa calculada pela Páscoa), opção de contar sábado e valor diferente em meses específicos. Receitas que acontecem uma única vez podem ser agendadas para uma data e entram no cálculo a partir dela.
 - **Confirmação de entradas e saídas:** receitas, contas e aportes só mexem no saldo quando você confirma. Dá para confirmar antes da data, mudar a data de uma ocorrência ou marcar que não aconteceu.
 - **Linha do tempo:** gráfico próprio em SVG com o saldo projetado até um mês depois do próximo salário e a lista cronológica dos eventos.
 - **Contas e metas:** saldos, ajuste manual para conferir com o banco, transferências (que não contam como gasto) e metas com progresso, prazo e aportes planejados.
@@ -158,16 +158,16 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 60 testes com o executor nativo do Node, sem dependências externas.
+São 64 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|
 | `tests/budget.test.js` | Limite diário (critérios de aceitação), gastos do dia, recálculo, salário, datas mudadas e confirmações antecipadas |
 | `tests/refill.test.js` | Cobertura, sugestão de resgate, corte por receita, limite da reserva e excedente |
 | `tests/businessDays.test.js` | Páscoa, feriados nacionais, Nº dia útil, regra do sábado e datas sem erro de fuso |
-| `tests/schedule.test.js` | Recorrências, pendências e ocorrências com data mudada |
+| `tests/schedule.test.js` | Recorrências, receitas únicas, pendências e ocorrências com data mudada |
 | `tests/money.test.js` | Leitura e formatação de valores em pt-BR |
-| `tests/store.test.js` | Nome e renomeação de gastos, sugestões de nomes |
+| `tests/store.test.js` | Receitas lançadas na hora, nome e renomeação de lançamentos, sugestões de nomes |
 | `tests/vault.test.js` | Código de recuperação, derivação de chaves, cifra e adulteração |
 | `tests/sync-core.test.js` | API do backup: revisões, conflitos, corrida entre aparelhos e validação |
 

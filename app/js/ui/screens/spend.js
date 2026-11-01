@@ -1,4 +1,4 @@
-// Lançar gasto: teclado numérico grande, só o valor (nome opcional).
+// Lançar gasto ou receita: teclado numérico grande, só o valor (nome opcional).
 
 import { h, toast, sheet, fitText } from '../dom.js';
 import { icon } from '../icons.js';
@@ -6,11 +6,16 @@ import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
 import { computeDailyBudget } from '../../core/budget.js';
 import { suggestRefill } from '../../core/refill.js';
-import { todayISO } from '../../core/dates.js';
+import { todayISO, addDays, formatDayMonth } from '../../core/dates.js';
 import { refillSheet } from './today.js';
-import { spendNameList } from '../editors.js';
+import { nameList, editIncome } from '../editors.js';
 
 const MAX_DIGITS = 9;
+
+const MODES = {
+  spend: { label: 'Gasto', account: 'Sai de', placeholder: 'Nome do gasto (opcional)', list: 'nomes-gastos' },
+  income: { label: 'Receita', account: 'Entra em', placeholder: 'Nome da receita (opcional)', list: 'nomes-receitas' },
+};
 
 function warnNegative(accountId) {
   const s = store.getState();
@@ -32,17 +37,28 @@ function warnNegative(accountId) {
   ]), 350);
 }
 
+/** Limite do dia se uma receita de `cents` entrasse agora na conta. */
+function limitWithIncome(state, today, accountId, cents) {
+  const sim = { ...state, accounts: state.accounts.map((a) => (a.id === accountId ? { ...a, balance: a.balance + cents } : a)) };
+  return computeDailyBudget(sim, today).dailyBudget;
+}
+
 export function renderSpend(ctx) {
   const state = ctx.state;
+  let mode = ctx.mode === 'income' ? 'income' : 'spend';
   let text = ''; // o que foi digitado, ex.: "12,5"
   let accountId = state.settings.defaultAccountId;
 
   const display = h('p', { class: 'amount-display', 'aria-live': 'polite', 'data-fit': true });
   const hint = h('p', { class: 'amount-hint' });
   const desc = h('input', {
-    type: 'text', placeholder: 'Nome do gasto (opcional)', maxlength: store.NAME_MAX, autocomplete: 'off',
-    autocapitalize: 'sentences', enterkeyhint: 'done', list: 'nomes-gastos', 'aria-label': 'Nome do gasto',
+    type: 'text', maxlength: store.NAME_MAX, autocomplete: 'off',
+    autocapitalize: 'sentences', enterkeyhint: 'done',
   });
+  const scheduleBtn = h('button', {
+    class: 'icon-btn schedule-btn', 'aria-label': 'Agendar para outro dia', title: 'Agendar para outro dia', onclick: schedule,
+  }, icon('calendar', { size: 22 }));
+  const accountLabel = h('span', { class: 'chips-label' });
   const confirmBtn = h('button', { class: 'btn primary xl block', disabled: true, onclick: save });
 
   const cents = () => {
@@ -53,15 +69,29 @@ export function renderSpend(ctx) {
 
   function update() {
     const v = cents();
+    const m = MODES[mode];
     display.textContent = formatBRL(v);
     display.classList.toggle('empty', v === 0);
+    display.classList.toggle('income', mode === 'income');
     confirmBtn.disabled = v <= 0;
     confirmBtn.textContent = v > 0 ? `Lançar ${formatBRL(v)}` : 'Digite o valor';
-    const left = ctx.budget.remainingToday - v;
-    hint.textContent = v === 0
-      ? `Resta para hoje: ${formatBRL(ctx.budget.remainingToday)}`
-      : left >= 0 ? `Sobram ${formatBRL(left)} hoje` : `Passa ${formatBRL(-left)} do limite de hoje`;
-    hint.classList.toggle('neg', v > 0 && left < 0);
+    desc.placeholder = m.placeholder;
+    desc.setAttribute('aria-label', m.placeholder.replace(' (opcional)', ''));
+    desc.setAttribute('list', m.list);
+    accountLabel.textContent = m.account;
+    scheduleBtn.hidden = mode !== 'income';
+    if (mode === 'income') {
+      hint.classList.remove('neg');
+      hint.textContent = v === 0
+        ? 'Entra no saldo agora e aumenta o limite do dia'
+        : `Limite do dia passa para ${formatBRL(limitWithIncome(state, ctx.today, accountId, v))}`;
+    } else {
+      const left = ctx.budget.remainingToday - v;
+      hint.textContent = v === 0
+        ? `Resta para hoje: ${formatBRL(ctx.budget.remainingToday)}`
+        : left >= 0 ? `Sobram ${formatBRL(left)} hoje` : `Passa ${formatBRL(-left)} do limite de hoje`;
+      hint.classList.toggle('neg', v > 0 && left < 0);
+    }
     if (display.isConnected) fitText(display.parentElement);
   }
 
@@ -81,13 +111,45 @@ export function renderSpend(ctx) {
   function save() {
     const v = cents();
     if (v <= 0) return;
-    const t = store.addSpend(v, desc.value.trim(), accountId);
+    const name = desc.value.trim();
+    if (mode === 'income') {
+      const t = store.addIncome(v, name, accountId);
+      ctx.navigate('#/hoje', { replace: true });
+      toast(`Receita de ${formatBRL(v)} lançada`, {
+        label: 'Desfazer', run: () => { store.deleteTransaction(t.id); toast('Receita desfeita'); },
+      });
+      return;
+    }
+    const t = store.addSpend(v, name, accountId);
     ctx.navigate('#/hoje', { replace: true });
     toast(`Gasto de ${formatBRL(v)} lançado`, {
       label: 'Desfazer', run: () => { store.deleteTransaction(t.id); toast('Gasto desfeito'); },
     });
     warnNegative(accountId);
   }
+
+  /** Receita que vai cair em outro dia: agenda uma receita única, já preenchida. */
+  function schedule() {
+    editIncome(null, {
+      draft: {
+        name: desc.value.trim(), amount: cents() || null, accountId,
+        rule: { type: 'once', date: addDays(ctx.today, 1) },
+      },
+      onSaved: (inc) => {
+        ctx.navigate('#/hoje', { replace: true });
+        toast(`${inc.name}: agendada para ${formatDayMonth(inc.rule.date)}`);
+      },
+    });
+  }
+
+  const modeButtons = Object.entries(MODES).map(([key, m]) => h('button', {
+    type: 'button', 'aria-pressed': String(key === mode),
+    onclick: () => {
+      mode = key;
+      modeButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(Object.keys(MODES)[i] === mode)));
+      update();
+    },
+  }, m.label));
 
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'];
   const pad = h('div', { class: 'keypad' }, keys.map((k) => h('button', {
@@ -97,7 +159,7 @@ export function renderSpend(ctx) {
   }, k === 'del' ? icon('backspace', { size: 26 }) : k)));
 
   const spending = state.accounts.filter((a) => a.kind === 'spending');
-  const chips = spending.length > 1 && h('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Sai de' },
+  const chips = spending.length > 1 && h('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Conta' },
     spending.map((a) => {
       const chip = h('button', {
         class: `chip ${a.id === accountId ? 'on' : ''}`, role: 'radio', 'aria-checked': String(a.id === accountId),
@@ -105,6 +167,7 @@ export function renderSpend(ctx) {
           accountId = a.id;
           chips.querySelectorAll('.chip').forEach((c) => { c.classList.remove('on'); c.setAttribute('aria-checked', 'false'); });
           chip.classList.add('on'); chip.setAttribute('aria-checked', 'true');
+          update();
         },
       }, a.name);
       return chip;
@@ -113,6 +176,7 @@ export function renderSpend(ctx) {
   const onKey = (e) => {
     if (!document.body.contains(pad)) return document.removeEventListener('keydown', onKey);
     if (e.target === desc) { if (e.key === 'Enter') save(); return; }
+    if (e.target.closest?.('.sheet')) return;
     if (/^[0-9]$/.test(e.key)) press(e.key);
     else if (e.key === ',' || e.key === '.') press(',');
     else if (e.key === 'Backspace') press('del');
@@ -124,12 +188,14 @@ export function renderSpend(ctx) {
   return h('div', { class: 'screen spend' },
     h('header', { class: 'topbar' },
       h('button', { class: 'icon-btn', 'aria-label': 'Voltar', onclick: () => ctx.navigate('#/hoje', { replace: true }) }, icon('back', { size: 24 })),
-      h('h1', {}, 'Novo gasto'), h('span')),
+      h('div', { class: 'segmented mode-toggle', role: 'group', 'aria-label': 'Tipo de lançamento' }, modeButtons),
+      h('span')),
     h('div', { class: 'amount-area' }, display, hint),
     h('div', { class: 'spend-opts' },
-      chips && h('div', { class: 'row gap' }, h('span', { class: 'chips-label' }, 'Sai de'), chips),
-      desc,
-      spendNameList('nomes-gastos')),
+      chips && h('div', { class: 'row gap' }, accountLabel, chips),
+      h('div', { class: 'row gap-sm' }, desc, scheduleBtn),
+      nameList(MODES.spend.list, 'spend'),
+      nameList(MODES.income.list, 'income')),
     pad,
     confirmBtn);
 }

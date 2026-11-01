@@ -131,6 +131,11 @@ export function addSpend(amount, desc = '', accountId = state.settings.defaultAc
   return commit((s) => applyTransaction(s, tx({ type: 'spend', amount, from: accountId, desc })));
 }
 
+/** Receita avulsa que já caiu: entra no saldo agora. */
+export function addIncome(amount, desc = '', accountId = state.settings.defaultAccountId) {
+  return commit((s) => applyTransaction(s, tx({ type: 'income', amount, to: accountId, desc })));
+}
+
 export function transfer(from, to, amount, desc = '') {
   return commit((s) => applyTransaction(s, tx({ type: 'transfer', amount, from, to, desc })));
 }
@@ -182,13 +187,13 @@ export function renameTransaction(id, name) {
   });
 }
 
-/** Nomes de gastos mais recentes, sem repetir, para sugerir ao digitar. */
-export function recentSpendNames(limit = 20) {
+/** Nomes mais recentes de um tipo de lançamento, sem repetir, para sugerir ao digitar. */
+export function recentNames(type = 'spend', limit = 20) {
   const seen = new Set();
   const out = [];
   for (let i = state.transactions.length - 1; i >= 0 && out.length < limit; i--) {
     const t = state.transactions[i];
-    const name = t.type === 'spend' && t.desc?.trim();
+    const name = t.type === type && t.desc?.trim();
     if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); out.push(name); }
   }
   return out;

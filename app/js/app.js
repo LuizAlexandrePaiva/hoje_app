@@ -17,12 +17,13 @@ import { renderSetup } from './ui/screens/setup.js';
 const ROUTES = {
   '#/hoje': renderToday,
   '#/gasto': renderSpend,
+  '#/receita': (ctx) => renderSpend({ ...ctx, mode: 'income' }),
   '#/linha': renderTimeline,
   '#/contas': renderAccounts,
   '#/metas': renderGoals,
   '#/ajustes': renderSettings,
 };
-const FULLSCREEN = new Set(['#/gasto']);
+const FULLSCREEN = new Set(['#/gasto', '#/receita']);
 
 const main = document.getElementById('main');
 const tabbar = document.getElementById('tabbar');

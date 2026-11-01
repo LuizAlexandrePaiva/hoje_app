@@ -2,12 +2,12 @@
 
 import { h, svg } from '../dom.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
-import { formatShort, formatLong, relative } from '../../core/dates.js';
+import { formatShort, formatLong, relative, addDays } from '../../core/dates.js';
 import { projectBalance } from '../../core/projection.js';
 import { spendingAccountIds } from '../../core/budget.js';
 import { flowInto } from '../../core/schedule.js';
 import * as store from '../../data/store.js';
-import { eventSheet } from '../editors.js';
+import { eventSheet, editIncome, addButton } from '../editors.js';
 
 const W = 360;
 const H = 200;
@@ -167,5 +167,6 @@ export function renderTimeline(ctx) {
       c.chart,
       legend()),
     h('h2', { class: 'section-label' }, 'Próximos eventos'),
-    h('section', { class: 'card flush' }, eventList(ctx, proj)));
+    h('section', { class: 'card flush' }, eventList(ctx, proj),
+      addButton('Agendar receita', () => editIncome(null, { draft: { rule: { type: 'once', date: addDays(ctx.today, 1) } } }))));
 }

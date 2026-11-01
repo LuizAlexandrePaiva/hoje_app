@@ -100,18 +100,20 @@ function nextIncome(ctx) {
 }
 
 function todaySpends(ctx) {
-  const list = ctx.state.transactions.filter((t) => t.type === 'spend' && t.date === ctx.today).reverse();
+  const list = ctx.state.transactions.filter((t) => (t.type === 'spend' || t.type === 'income') && t.date === ctx.today).reverse();
   if (!list.length) return null;
   const def = ctx.state.settings.defaultAccountId;
   return [
-    h('h2', { class: 'section-label' }, 'Gastos de hoje'),
+    h('h2', { class: 'section-label' }, 'Lançamentos de hoje'),
     h('section', { class: 'card flush' },
       h('ul', { class: 'list' }, list.map((t) => h('li', {},
         h('button', { class: 'list-item', onclick: () => transactionSheet(t) },
           h('span', { class: 'li-main' },
             h('span', { class: `li-title ${t.desc ? '' : 'muted'}` }, t.desc || 'Sem nome'),
-            h('span', { class: 'li-sub' }, [t.createdAt && timeFmt.format(new Date(t.createdAt)), t.from !== def && store.getAccount(t.from)?.name].filter(Boolean).join(', '))),
-          h('span', { class: 'li-value' }, formatBRL(t.amount))))))),
+            h('span', { class: 'li-sub' }, [t.createdAt && timeFmt.format(new Date(t.createdAt)), (t.from || t.to) !== def && store.getAccount(t.from || t.to)?.name].filter(Boolean).join(', '))),
+          t.type === 'income'
+            ? h('span', { class: 'li-value pos' }, `+${formatBRL(t.amount)}`)
+            : h('span', { class: 'li-value' }, formatBRL(t.amount))))))),
   ];
 }
 
@@ -120,7 +122,9 @@ export function renderToday(ctx) {
     h('header', { class: 'screen-head' }, h('h1', {}, 'Hoje'), h('p', { class: 'sub' }, formatHeader(ctx.today))),
     pendingCard(ctx),
     hero(ctx),
-    h('button', { class: 'btn primary xl block', onclick: () => ctx.navigate('#/gasto') }, icon('plus', { size: 22 }), 'Lançar gasto'),
+    h('div', { class: 'cta-row' },
+      h('button', { class: 'btn primary xl', onclick: () => ctx.navigate('#/gasto') }, icon('plus', { size: 22 }), 'Lançar gasto'),
+      h('button', { class: 'btn xl', onclick: () => ctx.navigate('#/receita') }, 'Receita')),
     coverageCard(ctx),
     nextIncome(ctx),
     backupBanner(ctx),
