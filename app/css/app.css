@@ -476,3 +476,23 @@ input[list]::-webkit-calendar-picker-indicator { display: none !important; }
 .topbar .mode-toggle { justify-self: center; width: min(240px, 100%); }
 .amount-display.income:not(.empty) { color: var(--pos); }
 .spend-opts .row.gap-sm > input { flex: 1; min-width: 0; }
+
+/* escolha única em lista (uso da conta) */
+.choices { display: flex; flex-direction: column; background: var(--surface-2); border-radius: 14px; padding: 2px 14px; }
+.choice {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px;
+  background: none; border: 0; padding: 8px 0; text-align: left; cursor: pointer;
+}
+.choice + .choice { border-top: 1px solid var(--divider); }
+.choice:disabled { cursor: default; }
+.choice:disabled .li-title { color: var(--muted); }
+.radio { width: 22px; height: 22px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 2px var(--control); }
+.choice[aria-checked="true"] .radio { box-shadow: inset 0 0 0 7px var(--pos); }
+
+/* transferências: valor neutro com o ícone ⇄ */
+.tx-move { display: inline-flex; align-items: center; gap: 6px; }
+.tx-move .ico { color: var(--muted); }
+
+/* movimentações agrupadas por dia dentro de um cartão */
+.card.flush > .day-group:first-child { padding-top: 12px; }
+.day-group .list > li:first-child .list-item { padding-top: 6px; }

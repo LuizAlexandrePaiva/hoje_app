@@ -145,34 +145,37 @@ export function backupBanner(ctx) {
   return card;
 }
 
-/** Cartão em Ajustes. */
-export function cloudCard() {
+/** Tom do texto de estado (verde quando salvo, laranja quando pede atenção). */
+export function statusTone(st = sync.getStatus()) {
+  return { synced: 'pos', conflict: 'warn-text', error: 'warn-text' }[st.status] ?? '';
+}
+
+/** Ficha do backup, aberta pela linha em Ajustes. */
+export function cloudSheet() {
   const st = sync.getStatus();
-  const tone = { synced: 'pos', conflict: 'warn-text', error: 'warn-text' }[st.status] ?? '';
-  return h('section', { class: 'card' },
-    h('div', { class: 'li-main' },
-      h('h3', { class: 'card-title' }, 'Backup na nuvem'),
-      h('span', { class: `li-sub ${tone}` }, statusText(st))),
-    st.enabled
-      ? [
-        st.status === 'conflict' && h('button', { class: 'btn warn block', onclick: () => conflictSheet() }, 'Resolver'),
-        h('div', { class: 'form-actions' },
-          h('button', { class: 'btn grow', onclick: () => codeSheet() }, 'Ver código'),
-          h('button', { class: 'btn grow', onclick: () => sync.syncNow() }, 'Salvar agora')),
-        h('button', {
-          class: 'btn quiet block',
-          onclick: async () => {
-            if (await confirmDialog('Desativar backup?', 'A cópia na nuvem será apagada. Os dados deste aparelho continuam.', 'Desativar', true)) {
-              try { await sync.disable({ deleteRemote: true }); toast('Backup desativado'); } catch { toast('Sem conexão para apagar a cópia'); }
-            }
-          },
-        }, 'Desativar'),
-      ]
-      : [
-        h('p', { class: 'small muted' }, 'Guarda uma cópia criptografada a cada mudança. Use o código para recuperar no Safari, no app instalado ou em outro celular.'),
-        h('button', { class: 'btn primary block', onclick: enableSheet }, 'Ativar backup'),
-        h('button', { class: 'btn quiet block', onclick: () => restoreSheet({ replacing: true }) }, 'Restaurar com código'),
-      ]);
+  if (!st.enabled) {
+    sheet('Backup na nuvem', () => [
+      h('p', { class: 'sheet-lead' }, 'Guarda uma cópia criptografada a cada mudança. Com o código, você recupera tudo no Safari, no app instalado ou em outro celular.'),
+      h('button', { class: 'btn primary block', onclick: enableSheet }, 'Ativar backup'),
+      h('button', { class: 'btn quiet block', onclick: () => restoreSheet({ replacing: true }) }, 'Restaurar com código'),
+    ]);
+    return;
+  }
+  sheet('Backup na nuvem', (close) => [
+    h('p', { class: `sheet-lead ${statusTone(st)}` }, statusText(st)),
+    st.status === 'conflict' && h('button', { class: 'btn warn block', onclick: () => conflictSheet() }, 'Resolver'),
+    h('div', { class: 'form-actions' },
+      h('button', { class: 'btn grow', onclick: () => codeSheet() }, 'Ver código'),
+      h('button', { class: 'btn grow', onclick: () => { sync.syncNow(); close(); toast('Salvando'); } }, 'Salvar agora')),
+    h('button', {
+      class: 'btn danger-text block',
+      onclick: async () => {
+        if (await confirmDialog('Desativar backup?', 'A cópia na nuvem será apagada. Os dados deste aparelho continuam.', 'Desativar', true)) {
+          try { await sync.disable({ deleteRemote: true }); toast('Backup desativado'); } catch { toast('Sem conexão para apagar a cópia'); }
+        }
+      },
+    }, 'Desativar backup'),
+  ]);
 }
 
 /** Passo final da configuração inicial. */

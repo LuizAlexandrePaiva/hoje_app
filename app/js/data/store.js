@@ -236,12 +236,19 @@ export function accountUsage(id) {
 }
 
 /** Garante conta padrão e de reserva válidas (contas de gasto). */
-function fixAccountRoles(s) {
+/**
+ * Garante uma conta de gastos do dia válida e uma reserva coerente.
+ * Ao cadastrar contas (autoReserve) a reserva é escolhida sozinha; quando a
+ * pessoa muda os papéis, "sem reserva" é respeitado.
+ */
+function fixAccountRoles(s, { autoReserve = true } = {}) {
   const spending = s.accounts.filter((a) => a.kind === 'spending');
   const ok = (id) => spending.some((a) => a.id === id);
   if (!ok(s.settings.defaultAccountId)) s.settings.defaultAccountId = spending[0]?.id || null;
-  if (!ok(s.settings.reserveAccountId) || s.settings.reserveAccountId === s.settings.defaultAccountId) {
-    s.settings.reserveAccountId = spending.find((a) => a.id !== s.settings.defaultAccountId)?.id || null;
+  const reserve = s.settings.reserveAccountId;
+  const invalid = !ok(reserve) || reserve === s.settings.defaultAccountId;
+  if (invalid && (autoReserve || reserve)) {
+    s.settings.reserveAccountId = autoReserve ? spending.find((a) => a.id !== s.settings.defaultAccountId)?.id || null : null;
   }
 }
 
@@ -249,7 +256,34 @@ export function updateSettings(patch) {
   commit((s) => {
     Object.assign(s.settings, patch);
     if (patch.refill) s.settings.refill = { ...s.settings.refill, ...patch.refill };
-    fixAccountRoles(s);
+    fixAccountRoles(s, { autoReserve: false });
+  });
+}
+
+/**
+ * Papel de uma conta de gasto: 'spend' (gastos do dia), 'reserve' (de onde
+ * vêm os resgates) ou 'none'. Trocar a de gastos com a reserva inverte as duas.
+ * Devolve a conta que assumiu os gastos do dia, se mudou por consequência.
+ */
+export function setAccountRole(id, role) {
+  return commit((s) => {
+    const st = s.settings;
+    const others = s.accounts.filter((a) => a.kind === 'spending' && a.id !== id);
+    if (role === 'spend') {
+      if (st.reserveAccountId === id) st.reserveAccountId = st.defaultAccountId !== id ? st.defaultAccountId : null;
+      st.defaultAccountId = id;
+      return null;
+    }
+    let moved = null;
+    if (st.defaultAccountId === id) {
+      if (!others.length) return null; // sempre existe uma conta para os gastos do dia
+      st.defaultAccountId = others[0].id;
+      moved = others[0];
+    }
+    if (role === 'reserve') st.reserveAccountId = id;
+    else if (st.reserveAccountId === id) st.reserveAccountId = null;
+    fixAccountRoles(s, { autoReserve: false });
+    return moved;
   });
 }
 

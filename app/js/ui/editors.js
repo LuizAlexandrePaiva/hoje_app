@@ -130,15 +130,19 @@ export function editAccount(account) {
   h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Tipo'), kind.el, kindHint),
   isNew
     ? field('Saldo hoje', balance, 'Negativo? Use o sinal de menos.')
-    : h('p', { class: 'field-hint' }, `Saldo atual: ${formatBRL(a.balance)}. Para corrigir, use “Ajustar” na aba Contas.`),
+    : h('p', { class: 'field-hint' }, `Saldo atual: ${formatBRL(a.balance)}. Para corrigir, use “Ajustar saldo”.`),
   err,
-  actions(!isNew && (async () => {
-    const uses = store.accountUsage(a.id);
-    if (uses.length) return fail(err, `Em uso por: ${uses.join(', ')}.`);
-    if (await confirmDialog('Excluir conta?', `“${a.name}” sai da lista. O histórico continua.`, 'Excluir', true)) {
-      store.remove('accounts', a.id);
-    }
-  }))));
+  actions(!isNew && (() => deleteAccount(a, (msg) => fail(err, msg))))));
+}
+
+/** Exclui uma conta, se nada depender dela. `onBlocked` recebe o motivo. */
+export async function deleteAccount(a, onBlocked = toast) {
+  const uses = store.accountUsage(a.id);
+  if (uses.length) return onBlocked(`Em uso por: ${uses.join(', ')}. Altere-os antes.`);
+  if (await confirmDialog('Excluir conta?', `“${a.name}” sai da lista. O histórico continua.`, 'Excluir', true)) {
+    store.remove('accounts', a.id);
+    toast('Conta excluída');
+  }
 }
 
 // ---------- exceções de valor por mês ----------
@@ -339,7 +343,7 @@ export function editContribution(contribution, goalId) {
   const from = select(accountOptions(state, 'spending'), c.fromAccountId);
   const err = errorBox();
   const done = state.settled[`contribution:${c.id}`];
-  sheet(isNew ? 'Planejar aporte' : 'Editar aporte', (close) => form(() => {
+  sheet(isNew ? 'Novo aporte' : 'Editar aporte', (close) => form(() => {
     const v = parseBRL(amount.value);
     if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.');
     if (!isValidISO(date.value)) return fail(err, 'Informe a data.');
@@ -503,31 +507,33 @@ const accName = (state, id) => state.accounts.find((a) => a.id === id)?.name ?? 
 const withAccount = (state, text, id) => (id === state.settings.defaultAccountId ? text : `${text}, ${accName(state, id)}`);
 
 export function accountsList(state, title = 'Contas') {
-  const role = (a) => (a.id === state.settings.defaultAccountId ? 'Padrão dos gastos'
+  const role = (a) => (a.id === state.settings.defaultAccountId ? 'Gastos do dia'
     : a.id === state.settings.reserveAccountId ? 'Reserva' : a.kind === 'goal' ? 'De meta' : 'De gasto');
   return listCard(title,
     state.accounts.map((a) => listItem(a.name, role(a), formatBRL(a.balance), () => editAccount(a))),
-    'Nenhuma conta ainda.', () => editAccount(), 'Adicionar conta');
+    'Nenhuma conta ainda.', () => editAccount(), 'Nova conta');
 }
 
 export function incomesList(state, title = 'Receitas') {
+  // receita única já recebida sai da lista; o registro fica nas movimentações
+  const visible = state.incomes.filter((i) => !(i.rule?.type === 'once' && state.settled[`income:${i.id}:unica`]));
   return listCard(title,
-    state.incomes.map((i) => listItem(i.name, withAccount(state, describeRule(i.rule), i.accountId),
+    visible.map((i) => listItem(i.name, withAccount(state, describeRule(i.rule), i.accountId),
       formatBRLShort(i.amount), () => editIncome(i), i.isSalary && h('span', { class: 'badge pos' }, 'Salário'))),
-    'Nenhuma receita ainda.', () => editIncome(), 'Adicionar receita');
+    'Nenhuma receita ainda.', () => editIncome(), 'Nova receita');
 }
 
 export function expensesList(state, title = 'Despesas fixas') {
   return listCard(title,
     state.expenses.map((e) => listItem(e.name, withAccount(state, `Dia ${e.day}`, e.accountId), formatBRLShort(e.amount), () => editExpense(e))),
-    'Nenhuma despesa fixa.', () => editExpense(), 'Adicionar despesa');
+    'Nenhuma despesa fixa.', () => editExpense(), 'Nova despesa');
 }
 
 export function goalsList(state, title = 'Metas') {
   const year = Number(todayISO().slice(0, 4));
   return listCard(title,
     state.goals.map((g) => listItem(g.name, `Até ${formatDayMonth(g.deadline, year)}`, formatBRLShort(g.target), () => editGoal(g))),
-    'Nenhuma meta.', () => editGoal(), 'Adicionar meta');
+    'Nenhuma meta.', () => editGoal(), 'Nova meta');
 }
 
 export function contributionsList(state, title = 'Aportes planejados') {
@@ -537,7 +543,7 @@ export function contributionsList(state, title = 'Aportes planejados') {
   return listCard(title,
     sorted.map((c) => listItem(goals.get(c.goalId)?.name ?? 'Meta excluída', formatDayMonth(c.date, year), formatBRLShort(c.amount), () => editContribution(c))),
     state.goals.length ? 'Nenhum aporte planejado.' : 'Crie uma meta para planejar aportes.',
-    () => (state.goals.length ? pickGoalThenContribution(state) : toast('Crie uma meta antes.')), 'Planejar aporte');
+    () => (state.goals.length ? pickGoalThenContribution(state) : toast('Crie uma meta antes.')), 'Novo aporte');
 }
 
 function pickGoalThenContribution(state) {

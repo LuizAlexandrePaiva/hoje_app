@@ -56,7 +56,7 @@ function goalCard(ctx, g) {
             h('span', { class: 'li-sub' }, done ? `Saiu de ${store.getAccount(c.fromAccountId)?.name ?? 'conta excluída'}` : relative(today, c.date))),
           h('span', { class: 'li-end' }, h('span', { class: 'li-value' }, formatBRLShort(c.amount)), icon('chevron', { size: 18, cls: 'chev' }))));
       })),
-      addButton('Planejar aporte', () => editContribution(null, g.id))));
+      addButton('Novo aporte', () => editContribution(null, g.id))));
 }
 
 export function renderGoals(ctx) {

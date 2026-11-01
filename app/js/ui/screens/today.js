@@ -109,7 +109,7 @@ function todaySpends(ctx) {
       h('ul', { class: 'list' }, list.map((t) => h('li', {},
         h('button', { class: 'list-item', onclick: () => transactionSheet(t) },
           h('span', { class: 'li-main' },
-            h('span', { class: `li-title ${t.desc ? '' : 'muted'}` }, t.desc || 'Sem nome'),
+            h('span', { class: `li-title ${t.desc ? '' : 'muted'}` }, t.desc || (t.type === 'income' ? 'Receita' : 'Gasto')),
             h('span', { class: 'li-sub' }, [t.createdAt && timeFmt.format(new Date(t.createdAt)), (t.from || t.to) !== def && store.getAccount(t.from || t.to)?.name].filter(Boolean).join(', '))),
           t.type === 'income'
             ? h('span', { class: 'li-value pos' }, `+${formatBRL(t.amount)}`)

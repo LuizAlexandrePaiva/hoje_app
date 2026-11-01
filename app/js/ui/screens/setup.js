@@ -20,13 +20,13 @@ const STEPS = [
     valid: (s) => s.accounts.some((a) => a.kind === 'spending') || 'Cadastre pelo menos uma conta de gasto.',
   },
   {
-    title: 'O que entra',
+    title: 'Receitas',
     lead: 'Receitas que se repetem todo mês.',
     tips: ['Marque o salário: o orçamento vai até a véspera dele.', 'Nada entra no saldo antes de você confirmar.'],
     render: (s) => [incomesList(s, null)],
   },
   {
-    title: 'O que sai',
+    title: 'Despesas fixas',
     lead: 'Contas fixas, como a fatura do cartão.',
     tips: ['Elas são reservadas antes do seu limite diário.'],
     render: (s) => [expensesList(s, null)],
@@ -39,8 +39,8 @@ const STEPS = [
   },
   {
     title: 'Resgates',
-    lead: 'De onde saem os gastos e de onde vem o dinheiro quando a conta baixar.',
-    render: (s) => [refillSettings(s)],
+    lead: 'Qual conta é a dos gastos do dia e de onde vem o dinheiro quando ela baixar. Depois, isso fica em cada conta, na aba Contas.',
+    render: (s) => [refillSettings(s, { withAccounts: true })],
   },
   {
     title: 'Backup',

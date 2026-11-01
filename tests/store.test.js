@@ -66,3 +66,24 @@ test('receita avulsa entra no saldo na hora, não conta como gasto e tem sugest�
   assert.deepEqual(store.recentNames('income'), ['Freela']);
   assert.deepEqual(store.recentNames('spend'), ['Café']);
 });
+
+test('papéis das contas: trocar gastos do dia e reserva, sem reserva, nunca sem conta de gastos', () => {
+  const st = () => store.getState().settings;
+  assert.equal(st().defaultAccountId, 'cc');
+  assert.equal(st().reserveAccountId, 'cdb');
+  // CDB vira a conta dos gastos: a corrente vira reserva (troca)
+  store.setAccountRole('cdb', 'spend');
+  assert.deepEqual([st().defaultAccountId, st().reserveAccountId], ['cdb', 'cc']);
+  // a reserva pode ficar sem conta, e isso é respeitado
+  store.setAccountRole('cc', 'none');
+  assert.deepEqual([st().defaultAccountId, st().reserveAccountId], ['cdb', null]);
+  store.updateSettings({ surplusEnabled: false });
+  assert.equal(st().reserveAccountId, null);
+  // tirar o papel da conta dos gastos passa a função para outra conta
+  const moved = store.setAccountRole('cdb', 'reserve');
+  assert.equal(moved.id, 'cc');
+  assert.deepEqual([st().defaultAccountId, st().reserveAccountId], ['cc', 'cdb']);
+  // conta de meta nunca vira conta de gastos
+  store.setAccountRole('cc', 'none');
+  assert.equal(st().defaultAccountId, 'cdb');
+});

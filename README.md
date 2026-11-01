@@ -55,7 +55,9 @@ O app foi feito para uso com uma mão no celular: um número grande, um botão p
 - **Receitas recorrentes e únicas:** dia fixo ou Nº dia útil do mês, com feriados nacionais (Sexta-feira Santa calculada pela Páscoa), opção de contar sábado e valor diferente em meses específicos. Receitas que acontecem uma única vez podem ser agendadas para uma data e entram no cálculo a partir dela.
 - **Confirmação de entradas e saídas:** receitas, contas e aportes só mexem no saldo quando você confirma. Dá para confirmar antes da data, mudar a data de uma ocorrência ou marcar que não aconteceu.
 - **Linha do tempo:** gráfico próprio em SVG com o saldo projetado até um mês depois do próximo salário e a lista cronológica dos eventos.
-- **Contas e metas:** saldos, ajuste manual para conferir com o banco, transferências (que não contam como gasto) e metas com progresso, prazo e aportes planejados.
+- **Contas:** saldos, uso de cada conta (gastos do dia, reserva ou nenhum), ajuste manual para conferir com o banco, transferências (que não contam como gasto) e movimentações agrupadas por dia.
+- **Metas:** progresso, prazo e aportes planejados.
+- **Ajustes:** receitas, despesas fixas, parâmetros de resgate e dados (backup na nuvem, exportar, importar). Cada informação mora em um lugar só.
 - **Configuração guiada:** no primeiro acesso, um assistente cadastra contas, receitas, despesas, metas e parâmetros. Nenhum dado pessoal fica no código.
 
 ## Como o orçamento é calculado
@@ -158,7 +160,7 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 64 testes com o executor nativo do Node, sem dependências externas.
+São 65 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|
@@ -167,7 +169,7 @@ São 64 testes com o executor nativo do Node, sem dependências externas.
 | `tests/businessDays.test.js` | Páscoa, feriados nacionais, Nº dia útil, regra do sábado e datas sem erro de fuso |
 | `tests/schedule.test.js` | Recorrências, receitas únicas, pendências e ocorrências com data mudada |
 | `tests/money.test.js` | Leitura e formatação de valores em pt-BR |
-| `tests/store.test.js` | Receitas lançadas na hora, nome e renomeação de lançamentos, sugestões de nomes |
+| `tests/store.test.js` | Receitas lançadas na hora, nome e renomeação de lançamentos, sugestões de nomes, uso das contas |
 | `tests/vault.test.js` | Código de recuperação, derivação de chaves, cifra e adulteração |
 | `tests/sync-core.test.js` | API do backup: revisões, conflitos, corrida entre aparelhos e validação |
 

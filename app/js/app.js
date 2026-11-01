@@ -40,7 +40,7 @@ function navigate(hash, { replace = false } = {}) {
 function buildContext(state) {
   const today = todayISO();
   currentDay = today;
-  const ctx = { state, today, navigate };
+  const ctx = { state, today, navigate, prevRoute: main.dataset.route };
   if (state.setupDone) {
     ctx.budget = computeDailyBudget(state, today);
     ctx.refill = suggestRefill(state, today, ctx.budget);
