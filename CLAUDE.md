@@ -38,6 +38,7 @@ O dono pediu explicitamente um design **sem cara e vícios de IA**.
 - **Impeccable** (skills de design) em `.claude/skills/impeccable/`, versão 4.8.0. O binário do motor fica fora do git e o launcher baixa de novo quando falta. O host `impeccable.style` foi liberado na rede do ambiente "Padrão".
 - **Configuração do Impeccable:** `.impeccable/config.json` guarda construção direto no código (`buildPath: code`), o hook ligado e o live mode apontando para `app/index.html`.
 - **Hooks:** ficam em `.claude/settings.local.json`, que não vai para o git. Em sessão nova, rodar `/impeccable hooks on` se quiser o hook.
+- **UI/UX Pro Max** (plugin `ui-ux-pro-max@ui-ux-pro-max-skill`, versão 2.15.0): declarado em `.claude/settings.json` (marketplace `nextlevelbuilder/ui-ux-pro-max-skill` + `enabledPlugins`), então carrega em toda sessão. Traz 7 skills (`ui-ux-pro-max`, `design`, `design-system`, `ui-styling`, `brand`, `banner-design`, `slides`), cerca de 1 mil tokens fixos por sessão. Sobrepõe o Impeccable; para mexer no app, chamar `/impeccable` pelo nome e não aceitar paletas ou fontes de catálogo que contrariem o sistema visual acima.
 - **Falta o `DESIGN.md`:** ainda não foi gerado. Próximo passo sugerido: `/impeccable document`.
 
 ## Histórico
