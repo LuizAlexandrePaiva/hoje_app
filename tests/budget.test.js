@@ -176,3 +176,17 @@ test('receita única agendada no meio do período entra a partir da data dela', 
   s.incomes.at(-1).rule.date = '2026-11-20';
   assert.equal(computeDailyBudget(s, TODAY).dailyBudget, 16993);
 });
+
+test('sem folga: shortfall é o total que falta no dia mais apertado', () => {
+  const s = scenario();
+  s.accounts.find((a) => a.id === 'cdb').balance = 0; // gastável = R$ 64
+  s.expenses.push({ id: 'alu', name: 'Aluguel', amount: 90000, accountId: 'cc', day: 30, exceptions: {}, since: TODAY });
+  const b = computeDailyBudget(s, TODAY);
+  assert.ok(b.dailyBudget < 0);
+  assert.equal(b.limitingDay, '2026-10-30');
+  assert.equal(b.shortfall, 90000 - 6400); // R$ 836,00
+});
+
+test('com folga, shortfall é zero', () => {
+  assert.equal(computeDailyBudget(scenario(), TODAY).shortfall, 0);
+});

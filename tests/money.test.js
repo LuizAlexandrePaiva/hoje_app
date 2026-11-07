@@ -21,3 +21,13 @@ test('toInput e formatBRL', () => {
   assert.equal(formatBRL(16993).replace(/\s/g, ' '), 'R$ 169,93');
   assert.equal(ceilTo(111051, 5000), 115000);
 });
+
+test('negativos usam o sinal de menos tipográfico e formatSigned mostra o sinal', async () => {
+  const { formatBRLShort, formatSigned } = await import('../app/js/core/money.js');
+  const norm = (t) => t.replace(/\s/g, ' ');
+  assert.equal(norm(formatBRL(-18600)), '−R$ 186,00');
+  assert.equal(norm(formatBRLShort(-50000)), '−R$ 500');
+  assert.equal(norm(formatSigned(4590, -1)), '−R$ 45,90');
+  assert.equal(norm(formatSigned(250000, 1, { short: true })), '+R$ 2.500');
+  assert.ok(!formatBRL(-100).includes('-'));
+});

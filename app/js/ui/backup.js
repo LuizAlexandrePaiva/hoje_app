@@ -3,7 +3,8 @@
 import { h, sheet, toast, confirmDialog } from './dom.js';
 import { icon } from './icons.js';
 import * as sync from '../data/sync.js';
-import { formatCode } from '../core/vault.js';
+import { formatCode, normalizeCode } from '../core/vault.js';
+import { field, fail } from './editors.js';
 import { TIME_ZONE, formatShort } from '../core/dates.js';
 
 const BANNER_KEY = 'hoje:aviso-backup';
@@ -75,33 +76,61 @@ function feature(ico, title, sub) {
 export function restoreSheet({ replacing = false, fileButton } = {}) {
   const input = h('input', {
     type: 'text', class: 'code-input', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false',
-    placeholder: 'XXXX XXXX XXXX XXXX XXXX XXXX', 'aria-label': 'Código de recuperação',
+    placeholder: 'XXXX XXXX XXXX XXXX XXXX XXXX',
   });
   const err = h('p', { class: 'form-error', role: 'alert' });
   const submit = h('button', { type: 'submit', class: 'btn primary block' }, 'Restaurar');
+  // Trocar dados exige confirmar, mas na própria folha: assim os erros continuam visíveis aqui
+  const warning = h('p', { class: 'notice', hidden: true }, icon('alert', { size: 18 }),
+    h('span', {}, 'Os dados deste aparelho serão substituídos pelos do backup. Não dá para desfazer.'));
+  const cancel = h('button', { type: 'button', class: 'btn quiet block', hidden: true }, 'Cancelar');
+  let confirmed = !replacing;
+  const resetConfirm = () => {
+    if (!replacing) return;
+    confirmed = false;
+    warning.hidden = true;
+    cancel.hidden = true;
+    submit.className = 'btn primary block';
+    submit.textContent = 'Restaurar';
+  };
+  cancel.addEventListener('click', resetConfirm);
+  input.addEventListener('input', () => { if (replacing && confirmed) resetConfirm(); });
+
   sheet('Restaurar dados', (close) => h('form', {
     class: 'form', novalidate: true,
     onsubmit: async (e) => {
       e.preventDefault();
       err.textContent = '';
-      if (replacing && !(await confirmDialog('Trocar os dados?', 'Os dados deste aparelho serão substituídos pelos do backup.', 'Trocar', true))) return;
+      if (!normalizeCode(input.value)) return fail(err, 'Código inválido. Confira as 24 letras e números.', input);
+      if (!confirmed) {
+        confirmed = true;
+        warning.hidden = false;
+        cancel.hidden = false;
+        submit.className = 'btn danger block';
+        submit.textContent = 'Trocar os dados deste aparelho';
+        return;
+      }
       submit.disabled = true;
-      submit.textContent = 'Restaurando';
+      cancel.disabled = true;
+      submit.textContent = 'Restaurando…';
       try {
         await sync.restore(input.value);
         close();
         toast('Dados restaurados');
       } catch (x) {
-        err.textContent = x.message;
         submit.disabled = false;
-        submit.textContent = 'Restaurar';
+        cancel.disabled = false;
+        submit.textContent = replacing ? 'Trocar os dados deste aparelho' : 'Restaurar';
+        fail(err, x.message);
       }
     },
   },
   h('p', { class: 'sheet-lead' }, 'Digite o código de recuperação que você guardou.'),
-  input,
+  field('Código de recuperação', input, '24 letras e números, com ou sem espaços.'),
+  warning,
   err,
   submit,
+  cancel,
   fileButton));
 }
 
@@ -119,8 +148,7 @@ export function conflictSheet(meta = {}) {
       class: 'btn block',
       onclick: async () => {
         if (!(await confirmDialog('Manter os deste aparelho?', 'A versão da nuvem será substituída por esta.', 'Manter', true))) return;
-        await sync.keepLocal();
-        toast('Nuvem atualizada com este aparelho');
+        try { await sync.keepLocal(); toast('Nuvem atualizada com este aparelho'); } catch (e) { toast(e.message); }
       },
     }, 'Manter os deste aparelho'),
   ]);
@@ -135,8 +163,8 @@ export function backupBanner(ctx) {
   const card = h('section', { class: 'card flush' },
     h('div', { class: 'row-item' },
       h('span', { class: 'li-main' },
-        h('span', { class: 'li-title' }, 'Proteja seus dados'),
-        h('span', { class: 'li-sub' }, 'Backup criptografado')),
+        h('span', { class: 'li-title' }, 'Ative o backup'),
+        h('span', { class: 'li-sub' }, 'Sem ele, os dados ficam só neste aparelho')),
       h('button', { class: 'btn small primary', onclick: enableSheet }, 'Ativar'),
       h('button', {
         class: 'icon-btn', 'aria-label': 'Lembrar depois',

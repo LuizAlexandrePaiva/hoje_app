@@ -59,6 +59,7 @@ export function computeDailyBudget(state, today) {
   let i = 0;
   let best = Infinity;
   let limitingDay = today;
+  let availableAtLimit = spendableStart;
   for (let k = 0; k < days; k++) {
     const day = addDays(today, k);
     while (i < events.length && events[i].effectiveDate <= day) {
@@ -69,10 +70,13 @@ export function computeDailyBudget(state, today) {
     if (perDay < best) {
       best = perDay;
       limitingDay = day;
+      availableAtLimit = spendableStart + cumulative;
     }
   }
 
   const dailyBudget = Math.round(best);
+  // Quando as contas previstas passam do dinheiro: quanto falta, no total, até o dia mais apertado.
+  const shortfall = availableAtLimit < 0 ? -availableAtLimit : 0;
   return {
     today,
     dailyBudget,
@@ -83,6 +87,7 @@ export function computeDailyBudget(state, today) {
     horizonEnd,
     days,
     limitingDay,
+    shortfall,
     nextSalary: salary,
   };
 }

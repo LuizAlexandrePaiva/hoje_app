@@ -1,2 +1,7 @@
 node_modules/
 .netlify/
+
+# Impeccable: platform engine binary (re-downloaded and checksum-verified by the launcher)
+.claude/skills/impeccable/scripts/bin/
+# Local-only Claude Code settings
+.claude/settings.local.json
