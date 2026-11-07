@@ -8,11 +8,30 @@ import * as store from '../../data/store.js';
 import { eventSheet, editIncome, addButton } from '../editors.js';
 
 const W = 360;
-const H = 212;
+const H = 188;
 // r: calha do rótulo "R$ 0" · b: datas do eixo
 const PAD = { l: 6, r: 34, t: 10, b: 26 };
 
 const pct = (v, total) => `${((v / total) * 100).toFixed(2)}%`;
+
+// curva suave que passa por todos os pontos sem ultrapassá-los (monotônica, como a
+// curveMonotoneX do d3): não cria picos nem vales que não existem nos dados
+function smoothPath(xs, ys) {
+  const n = xs.length;
+  const f = (v) => v.toFixed(1);
+  if (n < 3) return xs.map((x, i) => `${i ? 'L' : 'M'}${f(x)},${f(ys[i])}`).join('');
+  const d = []; // inclinação de cada trecho
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  const m = [d[0]];
+  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (2 * d[i - 1] * d[i]) / (d[i - 1] + d[i]));
+  m.push(d[n - 2]);
+  let out = `M${f(xs[0])},${f(ys[0])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const dx = (xs[i + 1] - xs[i]) / 3;
+    out += `C${f(xs[i] + dx)},${f(ys[i] + m[i] * dx)} ${f(xs[i + 1] - dx)},${f(ys[i + 1] - m[i + 1] * dx)} ${f(xs[i + 1])},${f(ys[i + 1])}`;
+  }
+  return out;
+}
 
 // rótulos em HTML por cima do SVG: ficam em 12 px de verdade, seja qual for a largura da tela
 function label(cls, text, { x, y } = {}) {
@@ -33,7 +52,7 @@ function chart(ctx, proj) {
   const bottom = PAD.t + ih;
   const x = (i) => PAD.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
   const y = (v) => PAD.t + ih - ((v - min) / (max - min)) * ih;
-  const path = (key) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
+  const path = (key) => smoothPath(pts.map((_, i) => x(i)), pts.map((p) => y(p[key])));
   const zeroY = y(0);
   const negative = values.some((v) => v < 0);
   const overlay = [];
@@ -47,6 +66,11 @@ function chart(ctx, proj) {
 
   // recortes acima/abaixo do zero: o que fica abaixo de R$ 0 aparece em vermelho
   root.append(svg('defs', {},
+    // degradê da área: forte junto à linha, some no zero (e o vermelho some para baixo)
+    svg('linearGradient', { id: 'tl-fill', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: PAD.t, y2: zeroY },
+      svg('stop', { offset: 0, class: 'fill-a' }), svg('stop', { offset: 1, class: 'fill-b' })),
+    svg('linearGradient', { id: 'tl-fill-neg', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: zeroY, y2: bottom },
+      svg('stop', { offset: 0, class: 'fill-neg-b' }), svg('stop', { offset: 1, class: 'fill-neg-a' })),
     svg('clipPath', { id: 'tl-above' }, svg('rect', { x: 0, y: 0, width: W, height: zeroY })),
     svg('clipPath', { id: 'tl-below' }, svg('rect', { x: 0, y: zeroY, width: W, height: H - zeroY }))));
 

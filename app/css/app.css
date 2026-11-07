@@ -410,15 +410,19 @@ body.no-tabbar .toast { bottom: calc(var(--safe-b) + var(--sp-4)); }
 .chart-wrap { position: relative; margin: 0 -4px; }
 .chart { width: 100%; height: auto; display: block; touch-action: pan-y; user-select: none; -webkit-user-select: none; border-radius: var(--r-control); cursor: crosshair; }
 .chart:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.chart .zero { stroke: var(--control); stroke-width: 1; opacity: .6; }
-.chart .area { fill: var(--s1); opacity: .1; }
-.chart .area.under { fill: var(--neg); opacity: .14; }
-.chart .line { fill: none; stroke: var(--s1); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.chart .zero { stroke: var(--control); stroke-width: 1; stroke-dasharray: 2 4; opacity: .7; }
+.chart .area { fill: url(#tl-fill); }
+.chart .area.under { fill: url(#tl-fill-neg); }
+.chart .fill-a { stop-color: var(--s1); stop-opacity: .28; }
+.chart .fill-b { stop-color: var(--s1); stop-opacity: 0; }
+.chart .fill-neg-a { stop-color: var(--neg); stop-opacity: .24; }
+.chart .fill-neg-b { stop-color: var(--neg); stop-opacity: 0; }
+.chart .line { fill: none; stroke: var(--s1); stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
 .chart .line.under { stroke: var(--neg); }
 .chart .salary-tick { stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; }
-.chart .cross { stroke: var(--text); stroke-width: 1; opacity: .3; }
-.chart .dot { fill: var(--s1); stroke: var(--surface); stroke-width: 2.5; }
-.chart .dot.under { fill: var(--neg); }
+.chart .cross { stroke: var(--text); stroke-width: 1; opacity: .18; }
+.chart .dot { fill: var(--surface); stroke: var(--s1); stroke-width: 2.25; }
+.chart .dot.under { stroke: var(--neg); }
 .chart-label { position: absolute; left: var(--x, 0); top: var(--y, 0); font-size: var(--fs-caption); line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .chart-label.strong { color: var(--text); font-weight: 600; }
 .chart-y { left: auto; right: 0; transform: translateY(-50%); }
