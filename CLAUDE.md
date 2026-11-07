@@ -15,7 +15,7 @@ arquitetura e regras de cálculo em `README.md`.
 - Ao mudar qualquer arquivo em `app/`, subir `CACHE_VERSION` em `app/sw.js` e `APP_VERSION` em `app/js/version.js` (mesmo número). Arquivo novo em `app/` entra também em `APP_FILES` do `sw.js`.
 - Produção: o Netlify publica a pasta `app/` a cada push na `main`. Trabalhar em branch e levar para a `main` por PR.
 
-## Sistema visual (versão 1.9.0)
+## Sistema visual (versão 1.9.1)
 
 Superfície de tarefa (modo Operate): precisão e consistência acima de expressão.
 O dono pediu explicitamente um design **sem cara e vícios de IA**.
@@ -32,7 +32,7 @@ O dono pediu explicitamente um design **sem cara e vícios de IA**.
   - **Erros de formulário:** `fail(err, msg, input)` em `editors.js` põe a mensagem embaixo do campo, com `aria-invalid` e foco.
   - **Toasts:** só para confirmações curtas, e com "Desfazer" quando a ação muda o cálculo; explicações longas vão dentro da folha.
   - **Listas:** nomes param em até duas linhas, nunca em reticências numa linha só.
-  - **Gráfico da Linha do tempo:** azul `--s1` cheio com área em degradê até o zero ("Sem gastar nada"); neutro quente `--s2` tracejado ("Gastando o limite"), que vira `--neg` abaixo de zero sobre faixa levemente tingida. Valores do eixo na calha da direita e datas embaixo, em HTML sobre o SVG (12 px reais em qualquer largura). Eventos numa faixa própria abaixo do gráfico: traço verde para cima (recebimento), vermelho para baixo (pagamento), altura pela raiz do valor. Painel de leitura com dois números grandes lado a lado.
+  - **Gráfico da Linha do tempo:** uma faixa só, entre "Sem gastar nada" (borda de cima, azul `--s1` cheio) e "Gastando o limite" (borda de baixo, azul claro `--s2` tracejado). O que passa abaixo de zero fica vermelho (`--neg`). Única referência do eixo y é a linha "R$ 0"; no eixo x só "hoje", "salário dd/mm" e o fim. Sem grade, sem marcadores de evento, sem legenda: o painel de cima identifica as bordas e uma frase embaixo explica como ler a faixa. Rótulos em HTML sobre o SVG (12 px reais em qualquer largura).
 
 ## Ferramentas instaladas
 
@@ -44,5 +44,5 @@ O dono pediu explicitamente um design **sem cara e vícios de IA**.
 ## Histórico
 
 - **2026-11-07, auditoria completa** de design, UX, textos e tipografia: 24 achados (0 P0, 2 P1, 16 P2, 6 P3), nota técnica 14/20. Relatório: https://claude.ai/artifact/JPpZHac8wHhRiK7WcaCQnT
-- **2026-11-07, versão 1.9.0:** gráfico da Linha do tempo redesenhado (descrito acima); os triângulos sobre a linha saíram. Testes: 70 passando.
+- **2026-11-07, versões 1.9.0 e 1.9.1:** gráfico da Linha do tempo redesenhado duas vezes. A 1.9.0 (eixo à direita, faixa de eventos, legenda) foi achada poluída pelo dono; a 1.9.1 virou a faixa única descrita acima. Testes: 70 passando.
 - **2026-11-07, versão 1.8.0:** os 24 achados corrigidos de uma vez, com o refinamento visual acima. Testes: 70 passando. Ficaram sem verificação: aparelho real, ajuste de fonte nativo do iOS/Android e os estados "Salvo" e "Conflito" do backup (dependem do servidor `/api/sync`).

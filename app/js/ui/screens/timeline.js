@@ -4,34 +4,13 @@ import { h, svg } from '../dom.js';
 import { formatBRL, formatSigned } from '../../core/money.js';
 import { formatShort, formatLong, formatDayMonth, relative, addDays } from '../../core/dates.js';
 import { projectBalance } from '../../core/projection.js';
-import { spendingAccountIds } from '../../core/budget.js';
-import { flowInto } from '../../core/schedule.js';
 import * as store from '../../data/store.js';
 import { eventSheet, editIncome, addButton } from '../editors.js';
 
 const W = 360;
-const H = 252;
-// t: espaço do rótulo do salário · r: calha dos valores · b: faixa de eventos + datas
-const PAD = { l: 6, r: 48, t: 26, b: 62 };
-const RAIL_GAP = 24; // distância entre o fundo do gráfico e a faixa de eventos
-
-function niceTicks(min, max, count = 4) {
-  const span = max - min || 1;
-  const raw = span / count;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
-  const ticks = [];
-  for (let v = Math.ceil(min / step) * step; v <= max; v += step) ticks.push(v);
-  return ticks;
-}
-
-function compactBRL(cents) {
-  const v = cents / 100 + 0; // + 0 transforma -0 em 0
-  const txt = Math.abs(v) >= 1000
-    ? `${(Math.abs(v) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`
-    : Math.abs(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-  return v < 0 ? `−${txt}` : txt;
-}
+const H = 212;
+// r: calha do rótulo "R$ 0" · b: datas do eixo
+const PAD = { l: 6, r: 34, t: 10, b: 26 };
 
 const pct = (v, total) => `${((v / total) * 100).toFixed(2)}%`;
 
@@ -43,21 +22,22 @@ function label(cls, text, { x, y } = {}) {
 
 function chart(ctx, proj) {
   const pts = proj.points;
-  const ids = spendingAccountIds(ctx.state);
   const values = pts.flatMap((p) => [p.events, p.spending]);
   let min = Math.min(0, ...values);
   let max = Math.max(...values);
   const padY = (max - min) * 0.08 || 1000;
-  min -= min < 0 ? padY : 0;
+  min -= min < 0 ? padY : padY * 0.4; // folga abaixo do zero para o ponto não encostar nas datas
   max += padY;
   const iw = W - PAD.l - PAD.r;
   const ih = H - PAD.t - PAD.b;
   const bottom = PAD.t + ih;
-  const railY = bottom + RAIL_GAP;
   const x = (i) => PAD.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
   const y = (v) => PAD.t + ih - ((v - min) / (max - min)) * ih;
-  const path = (key) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
+  const seg = (list, key, first) => list.map(([p, i], n) => `${n || !first ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
+  const indexed = pts.map((p, i) => [p, i]);
+  const path = (key) => seg(indexed, key, true);
   const zeroY = y(0);
+  const negative = values.some((v) => v < 0);
   const overlay = [];
 
   // o gráfico é um seletor de dia: toque, arraste ou setas do teclado
@@ -67,61 +47,42 @@ function chart(ctx, proj) {
     'aria-valuemin': 0, 'aria-valuemax': pts.length - 1,
   });
 
-  // degradê sob a linha principal e recortes acima/abaixo do zero
+  // recortes acima/abaixo do zero: o que fica abaixo de R$ 0 aparece em vermelho
   root.append(svg('defs', {},
-    svg('linearGradient', { id: 'tl-fill', x1: 0, y1: 0, x2: 0, y2: 1 },
-      svg('stop', { offset: 0, class: 'fill-top' }),
-      svg('stop', { offset: 1, class: 'fill-end' })),
     svg('clipPath', { id: 'tl-above' }, svg('rect', { x: 0, y: 0, width: W, height: zeroY })),
     svg('clipPath', { id: 'tl-below' }, svg('rect', { x: 0, y: zeroY, width: W, height: H - zeroY }))));
 
-  // abaixo de zero: faixa levemente tingida
-  if (min < 0) root.append(svg('rect', { x: PAD.l, y: zeroY, width: iw, height: bottom - zeroY, class: 'below-zero' }));
+  // a faixa: entre "sem gastar nada" (borda de cima) e "gastando o limite" (borda de baixo)
+  const band = `${path('events')}${seg([...indexed].reverse(), 'spending', false)}Z`;
+  root.append(svg('path', { d: band, class: 'band', 'clip-path': 'url(#tl-above)' }));
+  if (negative) root.append(svg('path', { d: band, class: 'band under', 'clip-path': 'url(#tl-below)' }));
 
-  // grade recessiva; valores na calha da direita, longe das linhas
-  for (const t of niceTicks(min, max)) {
-    root.append(svg('line', { x1: PAD.l, x2: W - PAD.r + 4, y1: y(t), y2: y(t), class: t === 0 ? 'zero' : 'grid' }));
-    overlay.push(label('chart-y', compactBRL(t), { y: y(t) }));
-  }
+  // única referência do eixo y: o zero
+  root.append(svg('line', { x1: PAD.l, x2: W - PAD.r + 4, y1: zeroY, y2: zeroY, class: 'zero' }));
+  overlay.push(label('chart-y', 'R$ 0', { y: zeroY }));
 
-  // marcador do próximo salário
-  const salIdx = ctx.budget.nextSalary ? pts.findIndex((p) => p.date === ctx.budget.nextSalary.date) : -1;
-  if (salIdx >= 0) {
-    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: PAD.t - 4, y2: railY, class: 'salary-line' }));
-    const edge = x(salIdx) < W * 0.15 ? ' start' : x(salIdx) > W * 0.8 ? ' end' : '';
-    overlay.push(label(`chart-tag${edge}`, ctx.budget.nextSalary.name, { x: x(salIdx) }));
-  }
-
-  // séries: área até o zero + linha cheia (sem gastar); tracejada (gastando o limite), vermelha abaixo de zero
-  root.append(svg('path', { d: `${path('events')}L${x(pts.length - 1).toFixed(1)},${zeroY.toFixed(1)}L${x(0).toFixed(1)},${zeroY.toFixed(1)}Z`, class: 'area' }));
   root.append(svg('path', { d: path('spending'), class: 'line s2', 'clip-path': 'url(#tl-above)' }));
-  if (min < 0) root.append(svg('path', { d: path('spending'), class: 'line s2 under', 'clip-path': 'url(#tl-below)' }));
+  if (negative) root.append(svg('path', { d: path('spending'), class: 'line s2 under', 'clip-path': 'url(#tl-below)' }));
   root.append(svg('path', { d: path('events'), class: 'line s1' }));
 
-  // faixa de eventos: recebimento sobe, pagamento desce; altura pelo valor
-  root.append(svg('line', { x1: PAD.l, x2: W - PAD.r + 4, y1: railY, y2: railY, class: 'rail' }));
-  const flows = pts.map((p) => {
-    const f = p.dayEvents.map((e) => flowInto(e, ids));
-    return { in: f.filter((v) => v > 0).reduce((a, b) => a + b, 0), out: -f.filter((v) => v < 0).reduce((a, b) => a + b, 0) };
-  });
-  const biggest = Math.max(1, ...flows.flatMap((f) => [f.in, f.out]));
-  const tick = (v) => 4 + 5 * Math.sqrt(v / biggest);
-  flows.forEach((f, i) => {
-    const cx = x(i).toFixed(1);
-    if (f.in) root.append(svg('line', { x1: cx, x2: cx, y1: railY - 3, y2: railY - 3 - tick(f.in), class: 'ev-tick in' }));
-    if (f.out) root.append(svg('line', { x1: cx, x2: cx, y1: railY + 3, y2: railY + 3 + tick(f.out), class: 'ev-tick out' }));
-  });
-
-  // eixo x: hoje, salário e fim
+  // eixo x: hoje, próximo salário (marquinha no pé) e fim
+  const salIdx = ctx.budget.nextSalary ? pts.findIndex((p) => p.date === ctx.budget.nextSalary.date) : -1;
   overlay.push(label('chart-x start', 'hoje', { x: x(0) }));
-  if (salIdx >= 6 && salIdx < pts.length - 6) overlay.push(label('chart-x', formatShort(pts[salIdx].date), { x: x(salIdx) }));
+  if (salIdx >= 8 && salIdx < pts.length - 8) {
+    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: bottom - 3, y2: bottom + 4, class: 'salary-tick' }));
+    overlay.push(label('chart-x strong', `salário ${formatShort(pts[salIdx].date)}`, { x: x(salIdx) }));
+  }
   overlay.push(label('chart-x end', formatShort(pts[pts.length - 1].date), { x: x(pts.length - 1) }));
 
   // seleção: linha vertical + pontos; os valores aparecem no painel acima
-  const cross = svg('line', { y1: PAD.t - 4, y2: railY, class: 'cross' });
+  const cross = svg('line', { y1: PAD.t, y2: bottom, class: 'cross' });
   const dot1 = svg('circle', { r: 5, class: 'dot s1' });
   const dot2 = svg('circle', { r: 5, class: 'dot s2' });
   root.append(cross, dot2, dot1);
+
+  const note = h('p', { class: 'chart-note' },
+    'A faixa mostra onde seu saldo pode estar: em cima, se você não gastar nada; embaixo, se gastar o limite todo dia.',
+    negative && ' Abaixo de R$ 0, em vermelho, faltaria dinheiro.');
 
   const rDate = h('p', { class: 'readout-date' });
   const rRel = h('span', { class: 'readout-rel' });
@@ -176,18 +137,7 @@ function chart(ctx, proj) {
   // começa mostrando a véspera do salário (o ponto mais apertado do período)
   select(Math.max(0, pts.findIndex((p) => p.date === ctx.budget.horizonEnd)));
 
-  return { readout, chart: h('div', { class: 'chart-wrap' }, root, overlay) };
-}
-
-// mesmos traços da faixa de eventos do gráfico
-const marker = (dir) => svg('svg', { width: 12, height: 16, viewBox: '0 0 12 16', 'aria-hidden': 'true' },
-  svg('line', { x1: 1, x2: 11, y1: 8, y2: 8, class: 'rail' }),
-  svg('line', { x1: 6, x2: 6, y1: dir === 'in' ? 5.5 : 10.5, y2: dir === 'in' ? 1.5 : 14.5, class: `ev-tick ${dir}` }));
-
-function legend() {
-  return h('div', { class: 'legend' },
-    h('span', {}, marker('in'), 'Recebimento'),
-    h('span', {}, marker('out'), 'Pagamento'));
+  return { readout, note, chart: h('div', { class: 'chart-wrap' }, root, overlay) };
 }
 
 function eventList(ctx, proj) {
@@ -225,7 +175,7 @@ export function renderTimeline(ctx) {
     h('section', { class: 'card' },
       c.readout,
       c.chart,
-      legend()),
+      c.note),
     h('h2', { class: 'section-label' }, 'Próximos eventos'),
     h('section', { class: 'card flush' }, eventList(ctx, proj),
       addButton('Agendar receita', () => editIncome(null, { draft: { rule: { type: 'once', date: addDays(ctx.today, 1) } } }))));
