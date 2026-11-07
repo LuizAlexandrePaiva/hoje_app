@@ -75,7 +75,7 @@ export function commit(mutator) {
 // ---------- validação / backup ----------
 
 function normalize(data) {
-  if (!data || typeof data !== 'object') throw new Error('Arquivo inválido');
+  if (!data || typeof data !== 'object') throw new Error('O arquivo não é um backup do Hoje.');
   const base = emptyState(data.createdAt);
   const s = { ...base, ...data };
   s.settings = { ...base.settings, ...(data.settings || {}) };
@@ -86,7 +86,7 @@ function normalize(data) {
   if (!s.settled || typeof s.settled !== 'object') s.settled = {};
   if (!s.moved || typeof s.moved !== 'object') s.moved = {};
   for (const a of s.accounts) {
-    if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('Conta inválida no backup');
+    if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('O backup tem uma conta com dados incompletos.');
   }
   return s;
 }
@@ -97,7 +97,7 @@ export function exportJSON() {
 
 export function importJSON(text) {
   const data = JSON.parse(text);
-  if (data.app && data.app !== 'hoje') throw new Error('Este arquivo não é um backup do Hoje');
+  if (data.app && data.app !== 'hoje') throw new Error('O arquivo não é um backup do Hoje.');
   replaceState(data);
 }
 
@@ -177,6 +177,11 @@ export function skipOccurrence(event) {
   commit((s) => { s.settled[event.key] = { date: todayISO(), amount: 0, skipped: true }; });
 }
 
+/** Desfaz um "Não veio" / "Pular": a ocorrência volta a ser prevista. */
+export function unskipOccurrence(event) {
+  commit((s) => { if (s.settled[event.key]?.skipped) delete s.settled[event.key]; });
+}
+
 export const NAME_MAX = 60;
 
 /** Dá ou troca o nome de um lançamento (vazio remove o nome). */
@@ -227,11 +232,13 @@ export function remove(collection, id) {
 
 /** O que impede apagar uma conta (itens que a usam). */
 export function accountUsage(id) {
+  // nomes do que depende da conta, prontos para uma frase: "Salário, Fatura do cartão e 1 aporte planejado"
   const uses = [];
-  state.incomes.filter((x) => x.accountId === id).forEach((x) => uses.push(`receita "${x.name}"`));
-  state.expenses.filter((x) => x.accountId === id).forEach((x) => uses.push(`despesa "${x.name}"`));
-  state.goals.filter((x) => x.accountId === id).forEach((x) => uses.push(`meta "${x.name}"`));
-  state.contributions.filter((x) => x.fromAccountId === id).forEach(() => uses.push('aporte planejado'));
+  state.incomes.filter((x) => x.accountId === id).forEach((x) => uses.push(x.name));
+  state.expenses.filter((x) => x.accountId === id).forEach((x) => uses.push(x.name));
+  state.goals.filter((x) => x.accountId === id).forEach((x) => uses.push(`a meta ${x.name}`));
+  const contribs = state.contributions.filter((x) => x.fromAccountId === id).length;
+  if (contribs) uses.push(contribs === 1 ? '1 aporte planejado' : `${contribs} aportes planejados`);
   return uses;
 }
 

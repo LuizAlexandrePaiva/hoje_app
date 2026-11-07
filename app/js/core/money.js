@@ -5,13 +5,30 @@ const brlRound = new Intl.NumberFormat('pt-BR', {
   style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0,
 });
 
+const MINUS = '\u2212';
+
+/** Negativos sempre com o sinal de menos tipográfico (−), igual em todo o app. */
+function withMinus(text) {
+  return text.replace(/^-|-(?=\s?R\$)/, MINUS).replace(/^(R\$\s?)-/, `${MINUS}$1`);
+}
+
 export function formatBRL(cents) {
-  return brl.format((cents || 0) / 100);
+  return withMinus(brl.format((cents || 0) / 100));
 }
 
 /** Sem centavos quando o valor é redondo: R$ 1.200 */
 export function formatBRLShort(cents) {
-  return cents % 100 === 0 ? brlRound.format(cents / 100) : formatBRL(cents);
+  return cents % 100 === 0 ? withMinus(brlRound.format(cents / 100)) : formatBRL(cents);
+}
+
+/**
+ * Valor com sinal explícito: gasto "−R$ 45,90", receita "+R$ 120,00".
+ * `sign` = 1 (entrada) ou −1 (saída); o valor é tratado em módulo.
+ */
+export function formatSigned(cents, sign, { short = false } = {}) {
+  const abs = Math.abs(cents || 0);
+  const body = short ? formatBRLShort(abs) : formatBRL(abs);
+  return `${sign < 0 ? MINUS : '+'}${body}`;
 }
 
 /** Converte texto digitado ("1.234,56", "79", "79,9") em centavos. */

@@ -3,7 +3,7 @@ import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import * as sync from '../../data/sync.js';
 import { todayISO } from '../../core/dates.js';
-import { incomesList, expensesList, field, inlineField, switchRow } from '../editors.js';
+import { incomesList, expensesList, field, inlineField, switchRow, errorBox, fail } from '../editors.js';
 import { APP_VERSION } from '../../version.js';
 import { cloudSheet, statusText, statusTone } from '../backup.js';
 
@@ -19,22 +19,27 @@ export function refillSettings(state, { withAccounts = false } = {}) {
     spending.map((a) => h('option', { value: a.id, selected: a.id === value || undefined }, a.name)));
   const def = withAccounts ? opts(s.defaultAccountId) : null;
   const res = withAccounts ? opts(s.reserveAccountId, true) : null;
-  const num = (v, label) => h('input', { type: 'text', inputmode: 'numeric', pattern: '[0-9]*', value: v, 'aria-label': label, maxlength: 5 });
-  const threshold = num(s.refill.thresholdDays, 'Avisar com menos de quantos dias');
-  const target = num(s.refill.targetDays, 'Dias que cada resgate cobre');
-  const step = num(s.refill.step / 100, 'Arredondar para múltiplos de quantos reais');
+  const num = (v) => h('input', { type: 'text', inputmode: 'numeric', pattern: '[0-9]*', value: v, maxlength: 5 });
+  const threshold = num(s.refill.thresholdDays);
+  const target = num(s.refill.targetDays);
+  const step = num(s.refill.step / 100);
   const surplus = switchRow('Sugerir aplicar sobras', 'Quando a conta tiver bem mais que o necessário.', s.surplusEnabled !== false);
+  const err = errorBox();
 
   const save = () => {
     const t = Number(threshold.value);
     const d = Number(target.value);
     const st = Math.round(Number(step.value) * 100);
-    if (!(Number.isInteger(t) && t >= 0 && Number.isInteger(d) && d >= 1 && st >= 100)) return toast('Confira os números de resgate.');
+    // erro fica embaixo do campo, que mantém o foco até ser corrigido
+    if (!(Number.isInteger(t) && t >= 0)) return fail(err, 'Use um número inteiro de dias, 0 ou mais.', threshold);
+    if (!(Number.isInteger(d) && d >= 1)) return fail(err, 'Use um número inteiro de dias, 1 ou mais.', target);
+    if (!(Number.isFinite(st) && st >= 100)) return fail(err, 'Use um valor de pelo menos R$ 1.', step);
     const patch = { surplusEnabled: surplus.input.checked, refill: { thresholdDays: t, targetDays: d, step: st } };
     if (withAccounts) {
-      if (def.value && def.value === res.value) return toast('A reserva precisa ser outra conta.');
+      if (def.value && def.value === res.value) return fail(err, 'Escolha uma reserva diferente da conta dos gastos do dia.', res);
       Object.assign(patch, { defaultAccountId: def.value || null, reserveAccountId: res.value || null });
     }
+    fail(err, '');
     store.updateSettings(patch);
     toast('Salvo');
   };
@@ -44,9 +49,10 @@ export function refillSettings(state, { withAccounts = false } = {}) {
     withAccounts && field('Gastos do dia', def, 'Conta de onde saem os gastos lançados.'),
     withAccounts && field('Reserva', res, 'Conta de onde vem o dinheiro dos resgates.'),
     h('div', {},
-      inlineField('Avisar com menos de', threshold, 'dias de cobertura'),
-      inlineField('Cada resgate cobre', target, 'dias'),
-      inlineField('Arredondar para', step, 'múltiplos de R$')),
+      inlineField('Avisar quando a conta cobrir menos de', threshold, null, { unit: 'dias' }),
+      inlineField('Cada resgate deve cobrir', target, null, { unit: 'dias' }),
+      inlineField('Arredondar resgates para múltiplos de', step, null, { unit: 'R$', prefix: true })),
+    err,
     surplus.el);
 }
 
@@ -74,7 +80,8 @@ function fileImporter(confirmFirst = true) {
       closeSheet();
       toast('Arquivo importado');
     } catch (e) {
-      toast(`Não deu para importar: ${e.message}`);
+      const why = e instanceof SyntaxError ? 'O arquivo não é um backup do Hoje.' : e.message;
+      toast(`Não deu para importar. ${why}`);
     }
   });
   return [input, () => input.click()];
@@ -120,5 +127,5 @@ export function renderSettings(ctx) {
     refillSettings(state),
     h('h2', { class: 'section-label' }, 'Dados'),
     dataCard(),
-    h('p', { class: 'caption center', style: 'padding-top:8px' }, `Hoje ${APP_VERSION}`));
+    h('p', { class: 'caption center version' }, `Hoje ${APP_VERSION}`));
 }

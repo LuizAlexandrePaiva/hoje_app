@@ -3,7 +3,7 @@
 import { h, sheet, toast } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
-import { formatBRL } from '../../core/money.js';
+import { formatBRL, formatSigned } from '../../core/money.js';
 import { formatLong, addDays, TIME_ZONE } from '../../core/dates.js';
 import { adjustSheet, transferSheet, addButton, editAccount, deleteAccount, listItem, transactionSheet, TX_LABEL } from '../editors.js';
 
@@ -20,14 +20,14 @@ function txValue(t) {
   if (t.type === 'transfer' || t.type === 'contribution') {
     return h('span', { class: 'li-value tx-move' }, icon('transfer', { size: 15 }), formatBRL(t.amount));
   }
-  if (t.type === 'income') return h('span', { class: 'li-value pos' }, `+${formatBRL(t.amount)}`);
-  if (t.type === 'adjust') return h('span', { class: 'li-value' }, `${t.amount >= 0 ? '+' : '−'}${formatBRL(Math.abs(t.amount))}`);
-  return h('span', { class: 'li-value' }, `−${formatBRL(t.amount)}`);
+  if (t.type === 'income') return h('span', { class: 'li-value pos' }, formatSigned(t.amount, 1));
+  if (t.type === 'adjust') return h('span', { class: 'li-value' }, formatSigned(t.amount, t.amount >= 0 ? 1 : -1));
+  return h('span', { class: 'li-value' }, formatSigned(t.amount, -1));
 }
 
 /** Uma linha de detalhe: hora (se houver), e a conta só quando não é a dos gastos do dia. */
 function txSub(t, def) {
-  if (t.type === 'transfer' || t.type === 'contribution') return `${accName(t.from)} → ${accName(t.to)}`;
+  if (t.type === 'transfer' || t.type === 'contribution') return `De ${accName(t.from)} para ${accName(t.to)}`;
   const time = t.createdAt && (t.type === 'spend' || t.type === 'income') ? timeFmt.format(new Date(t.createdAt)) : null;
   const acc = t.from || t.to;
   const parts = [time, acc !== def ? accName(acc) : null];
@@ -37,7 +37,7 @@ function txSub(t, def) {
 function txRow(t, def) {
   return h('li', {}, h('button', { class: 'list-item', onclick: () => transactionSheet(t) },
     h('span', { class: 'li-main' },
-      h('span', { class: `li-title ${t.desc ? '' : 'muted'}` }, t.desc || TX_LABEL[t.type]),
+      h('span', { class: `li-title ${t.desc ? '' : 'is-placeholder'}` }, t.desc || TX_LABEL[t.type]),
       txSub(t, def) && h('span', { class: 'li-sub' }, txSub(t, def))),
     txValue(t)));
 }
@@ -101,9 +101,9 @@ function roleChooser(ctx, a) {
   const options = [
     ['spend', 'Gastos do dia', 'De onde saem os gastos lançados', null],
     ['reserve', 'Reserva', 'De onde vêm os resgates',
-      current === 'spend' && !others.length ? 'Cadastre outra conta de gasto antes' : null],
+      current === 'spend' && !others.length ? 'Antes, cadastre outra conta de gasto' : null],
     ['none', 'Nenhum', 'Só guarda saldo',
-      current === 'spend' ? 'Escolha outra conta para os gastos do dia antes' : null],
+      current === 'spend' ? 'Antes, defina outra conta para os gastos do dia' : null],
   ];
   return h('div', { class: 'field' },
     h('span', { class: 'field-label' }, 'Uso'),
@@ -125,10 +125,17 @@ function accountSheet(ctx, a) {
   const s = ctx.state.settings;
   const recent = recentFirst(ctx.state.transactions.filter((t) => t.from === a.id || t.to === a.id)).slice(0, 5);
   const goals = goalsOf(ctx.state, a);
+  // motivo de não poder excluir aparece aqui dentro, sem prazo para sumir
+  const blocked = h('p', { class: 'notice', role: 'status', hidden: true });
+  const showBlocked = (msg) => {
+    blocked.replaceChildren(icon('alert', { size: 18 }), h('span', {}, msg));
+    blocked.hidden = false;
+    blocked.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
   sheet(a.name, () => [
     h('div', { class: 'stat' },
       h('span', { class: 'stat-label' }, 'Saldo'),
-      h('span', { class: `stat-value ${a.balance < 0 ? 'neg' : ''}`, style: 'font-size:2rem', 'data-fit': true }, formatBRL(a.balance))),
+      h('span', { class: `stat-value lg ${a.balance < 0 ? 'neg' : ''}`, 'data-fit': true }, formatBRL(a.balance))),
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn grow', onclick: () => adjustSheet(a) }, icon('edit', { size: 18 }), 'Ajustar saldo'),
       h('button', {
@@ -143,9 +150,10 @@ function accountSheet(ctx, a) {
       recent.length
         ? h('ul', { class: 'list' }, recent.map((t) => txRow(t, a.id)))
         : h('p', { class: 'empty' }, 'Nenhuma movimentação ainda.')),
+    blocked,
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn quiet grow', onclick: () => editAccount(a) }, 'Editar nome'),
-      h('button', { class: 'btn danger-text grow', onclick: () => deleteAccount(a) }, 'Excluir conta')),
+      h('button', { class: 'btn danger-text grow', onclick: () => deleteAccount(a, showBlocked) }, 'Excluir conta')),
   ]);
 }
 
@@ -165,7 +173,7 @@ export function renderAccounts(ctx) {
     h('section', { class: 'card' },
       h('div', { class: 'stat' },
         h('span', { class: 'stat-label' }, 'Nas contas de gasto'),
-        h('span', { class: `stat-value ${total < 0 ? 'neg' : ''}`, style: 'font-size:2rem', 'data-fit': true }, formatBRL(total)),
+        h('span', { class: `stat-value lg ${total < 0 ? 'neg' : ''}`, 'data-fit': true }, formatBRL(total)),
         goal.length > 0 && h('span', { class: 'li-sub' }, `Fora do orçamento: ${formatBRL(outside)}`))),
     h('h2', { class: 'section-label' }, 'Contas de gasto'),
     h('section', { class: 'card flush' }, h('ul', { class: 'list' }, spending.map((a) => accountRow(ctx, a)))),

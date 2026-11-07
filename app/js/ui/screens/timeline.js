@@ -1,8 +1,8 @@
 // Linha do tempo: gráfico SVG próprio do saldo projetado + lista de eventos.
 
 import { h, svg } from '../dom.js';
-import { formatBRL, formatBRLShort } from '../../core/money.js';
-import { formatShort, formatLong, relative, addDays } from '../../core/dates.js';
+import { formatBRL, formatSigned } from '../../core/money.js';
+import { formatShort, formatLong, formatDayMonth, relative, addDays } from '../../core/dates.js';
 import { projectBalance } from '../../core/projection.js';
 import { spendingAccountIds } from '../../core/budget.js';
 import { flowInto } from '../../core/schedule.js';
@@ -11,7 +11,7 @@ import { eventSheet, editIncome, addButton } from '../editors.js';
 
 const W = 360;
 const H = 200;
-const PAD = { l: 8, r: 8, t: 22, b: 24 };
+const PAD = { l: 8, r: 8, t: 24, b: 26 };
 
 function niceTicks(min, max, count = 4) {
   const span = max - min || 1;
@@ -25,8 +25,10 @@ function niceTicks(min, max, count = 4) {
 
 function compactBRL(cents) {
   const v = cents / 100 + 0; // + 0 transforma -0 em 0
-  if (Math.abs(v) >= 1000) return `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
-  return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  const txt = Math.abs(v) >= 1000
+    ? `${(Math.abs(v) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`
+    : Math.abs(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  return v < 0 ? `\u2212${txt}` : txt;
 }
 
 function chart(ctx, proj) {
@@ -44,12 +46,18 @@ function chart(ctx, proj) {
   const y = (v) => PAD.t + ih - ((v - min) / (max - min)) * ih;
   const path = (key) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
 
-  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': 'Saldo projetado das contas de gasto' });
+  // o gráfico é um seletor de dia: toque, arraste ou setas do teclado
+  const root = svg('svg', {
+    viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'slider', tabindex: '0',
+    'aria-label': 'Saldo projetado. Use as setas para mudar o dia.',
+    'aria-valuemin': 0, 'aria-valuemax': pts.length - 1,
+  });
 
-  // grade recessiva + rótulos do eixo y
-  for (const t of niceTicks(min, max)) {
+  // grade recessiva + rótulos do eixo y (o maior leva "R$")
+  const ticks = niceTicks(min, max);
+  for (const t of ticks) {
     root.append(svg('line', { x1: PAD.l, x2: W - PAD.r, y1: y(t), y2: y(t), class: t === 0 ? 'zero' : 'grid' }));
-    root.append(svg('text', { x: PAD.l + 2, y: y(t) - 4, class: 'axis' }, compactBRL(t)));
+    root.append(svg('text', { x: PAD.l + 2, y: y(t) - 5, class: 'axis' }, `${t === ticks[ticks.length - 1] ? 'R$ ' : ''}${compactBRL(t)}`));
   }
 
   // marcador do próximo salário
@@ -95,11 +103,13 @@ function chart(ctx, proj) {
   const readout = h('div', { class: 'readout', 'aria-live': 'polite' },
     h('div', { class: 'row between' }, rDate, rRel),
     h('div', { class: 'readout-rows' },
-      h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Sem gastos do dia'), rV1,
-      h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Gastando o limite'), rV2),
+      h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Se não gastar nada'), rV1,
+      h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Se gastar o limite todo dia'), rV2),
     rEvents);
 
+  let current = 0;
   const select = (i) => {
+    current = i;
     const p = pts[i];
     for (const el of [cross]) { el.setAttribute('x1', x(i)); el.setAttribute('x2', x(i)); }
     dot1.setAttribute('cx', x(i)); dot1.setAttribute('cy', y(p.events));
@@ -109,7 +119,9 @@ function chart(ctx, proj) {
     rV1.textContent = formatBRL(p.events);
     rV2.textContent = formatBRL(p.spending);
     rV2.classList.toggle('neg', p.spending < 0);
-    rEvents.textContent = p.dayEvents.map((e) => `${e.kind === 'income' ? '▲' : '▼'} ${e.name} ${formatBRLShort(e.amount)}`).join('    ');
+    rEvents.textContent = p.dayEvents.map((e) => `${e.name} ${formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })}`).join(' · ');
+    root.setAttribute('aria-valuenow', i);
+    root.setAttribute('aria-valuetext', `${formatLong(p.date)}: ${formatBRL(p.events)} se não gastar nada, ${formatBRL(p.spending)} se gastar o limite`);
   };
   const pick = (clientX) => {
     const r = root.getBoundingClientRect();
@@ -118,16 +130,30 @@ function chart(ctx, proj) {
   };
   root.addEventListener('pointermove', (e) => pick(e.clientX));
   root.addEventListener('pointerdown', (e) => pick(e.clientX));
+  // toque e clique escolhem o dia sem levar o foco (o anel fica só para o teclado)
+  root.addEventListener('mousedown', (e) => e.preventDefault());
+  root.addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 7, PageDown: -7 }[e.key];
+    if (e.key === 'Home') select(0);
+    else if (e.key === 'End') select(pts.length - 1);
+    else if (step) select(Math.max(0, Math.min(pts.length - 1, current + step)));
+    else return;
+    e.preventDefault();
+  });
   // começa mostrando a véspera do salário (o ponto mais apertado do período)
   select(Math.max(0, pts.findIndex((p) => p.date === ctx.budget.horizonEnd)));
 
   return { readout, chart: h('div', { class: 'chart-wrap' }, root) };
 }
 
+// mesmos triângulos desenhados no gráfico
+const marker = (dir) => svg('svg', { width: 12, height: 10, viewBox: '0 0 12 10', 'aria-hidden': 'true' },
+  svg('path', { d: dir === 'in' ? 'M1 9L11 9L6 1Z' : 'M1 1L11 1L6 9Z', class: `mk-key ${dir}` }));
+
 function legend() {
   return h('div', { class: 'legend' },
-    h('span', {}, h('i', { class: 'tri in' }, '▲'), 'Recebimento'),
-    h('span', {}, h('i', { class: 'tri out' }, '▼'), 'Pagamento'));
+    h('span', {}, marker('in'), 'Recebimento'),
+    h('span', {}, marker('out'), 'Pagamento'));
 }
 
 function eventList(ctx, proj) {
@@ -141,8 +167,8 @@ function eventList(ctx, proj) {
   const accName = (id) => store.getAccount(id)?.name ?? 'conta excluída';
   // conta só aparece quando não é a padrão; atraso sempre aparece
   const sub = (e) => {
-    if (e.overdue) return `Atrasado, previsto para ${formatShort(e.date)}`;
-    if (e.originalDate && e.date !== e.originalDate) return `Data mudada, era ${formatShort(e.originalDate)}`;
+    if (e.overdue) return `Atrasado, previsto para ${formatDayMonth(e.date, Number(ctx.today.slice(0, 4)))}`;
+    if (e.originalDate && e.date !== e.originalDate) return `Data mudada, era ${formatDayMonth(e.originalDate, Number(ctx.today.slice(0, 4)))}`;
     if (e.accountId === def) return null;
     return e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
   };
@@ -152,7 +178,7 @@ function eventList(ctx, proj) {
       h('span', { class: `ev-dot ${e.kind === 'income' ? 'in' : 'out'}` }),
       h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: 'li-sub' }, sub(e))),
       h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` },
-        `${e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)}`))))));
+        formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })))))));
 }
 
 export function renderTimeline(ctx) {
@@ -161,7 +187,7 @@ export function renderTimeline(ctx) {
   return h('div', { class: 'screen timeline' },
     h('header', { class: 'screen-head' },
       h('h1', {}, 'Linha do tempo'),
-      h('p', { class: 'sub' }, 'Toque no gráfico para ver cada dia')),
+      h('p', { class: 'sub' }, 'Toque ou arraste no gráfico para ver cada dia')),
     h('section', { class: 'card' },
       c.readout,
       c.chart,
