@@ -4,47 +4,58 @@ import { h, svg } from '../dom.js';
 import { formatBRL, formatSigned } from '../../core/money.js';
 import { formatShort, formatLong, formatDayMonth, relative, addDays } from '../../core/dates.js';
 import { projectBalance } from '../../core/projection.js';
-import { spendingAccountIds } from '../../core/budget.js';
-import { flowInto } from '../../core/schedule.js';
 import * as store from '../../data/store.js';
 import { eventSheet, editIncome, addButton } from '../editors.js';
 
 const W = 360;
-const H = 200;
-const PAD = { l: 8, r: 8, t: 24, b: 26 };
+const H = 188;
+// r: calha do rótulo "R$ 0" · b: datas do eixo
+const PAD = { l: 6, r: 34, t: 10, b: 26 };
 
-function niceTicks(min, max, count = 4) {
-  const span = max - min || 1;
-  const raw = span / count;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
-  const ticks = [];
-  for (let v = Math.ceil(min / step) * step; v <= max; v += step) ticks.push(v);
-  return ticks;
+const pct = (v, total) => `${((v / total) * 100).toFixed(2)}%`;
+
+// curva suave que passa por todos os pontos sem ultrapassá-los (monotônica, como a
+// curveMonotoneX do d3): não cria picos nem vales que não existem nos dados
+function smoothPath(xs, ys) {
+  const n = xs.length;
+  const f = (v) => v.toFixed(1);
+  if (n < 3) return xs.map((x, i) => `${i ? 'L' : 'M'}${f(x)},${f(ys[i])}`).join('');
+  const d = []; // inclinação de cada trecho
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  const m = [d[0]];
+  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (2 * d[i - 1] * d[i]) / (d[i - 1] + d[i]));
+  m.push(d[n - 2]);
+  let out = `M${f(xs[0])},${f(ys[0])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const dx = (xs[i + 1] - xs[i]) / 3;
+    out += `C${f(xs[i] + dx)},${f(ys[i] + m[i] * dx)} ${f(xs[i + 1] - dx)},${f(ys[i + 1] - m[i + 1] * dx)} ${f(xs[i + 1])},${f(ys[i + 1])}`;
+  }
+  return out;
 }
 
-function compactBRL(cents) {
-  const v = cents / 100 + 0; // + 0 transforma -0 em 0
-  const txt = Math.abs(v) >= 1000
-    ? `${(Math.abs(v) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`
-    : Math.abs(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-  return v < 0 ? `\u2212${txt}` : txt;
+// rótulos em HTML por cima do SVG: ficam em 12 px de verdade, seja qual for a largura da tela
+function label(cls, text, { x, y } = {}) {
+  const vars = [x != null && `--x:${pct(x, W)}`, y != null && `--y:${pct(y, H)}`].filter(Boolean).join(';');
+  return h('span', { class: `chart-label ${cls}`, style: vars || null, 'aria-hidden': 'true' }, text);
 }
 
 function chart(ctx, proj) {
   const pts = proj.points;
-  const ids = spendingAccountIds(ctx.state);
-  const values = pts.flatMap((p) => [p.events, p.spending]);
+  const values = pts.map((p) => p.spending);
   let min = Math.min(0, ...values);
   let max = Math.max(...values);
   const padY = (max - min) * 0.08 || 1000;
-  min -= min < 0 ? padY : 0;
+  min -= min < 0 ? padY : padY * 0.4; // folga abaixo do zero para o ponto não encostar nas datas
   max += padY;
   const iw = W - PAD.l - PAD.r;
   const ih = H - PAD.t - PAD.b;
+  const bottom = PAD.t + ih;
   const x = (i) => PAD.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
   const y = (v) => PAD.t + ih - ((v - min) / (max - min)) * ih;
-  const path = (key) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
+  const path = (key) => smoothPath(pts.map((_, i) => x(i)), pts.map((p) => y(p[key])));
+  const zeroY = y(0);
+  const negative = values.some((v) => v < 0);
+  const overlay = [];
 
   // o gráfico é um seletor de dia: toque, arraste ou setas do teclado
   const root = svg('svg', {
@@ -53,75 +64,73 @@ function chart(ctx, proj) {
     'aria-valuemin': 0, 'aria-valuemax': pts.length - 1,
   });
 
-  // grade recessiva + rótulos do eixo y (o maior leva "R$")
-  const ticks = niceTicks(min, max);
-  for (const t of ticks) {
-    root.append(svg('line', { x1: PAD.l, x2: W - PAD.r, y1: y(t), y2: y(t), class: t === 0 ? 'zero' : 'grid' }));
-    root.append(svg('text', { x: PAD.l + 2, y: y(t) - 5, class: 'axis' }, `${t === ticks[ticks.length - 1] ? 'R$ ' : ''}${compactBRL(t)}`));
-  }
+  // recortes acima/abaixo do zero: o que fica abaixo de R$ 0 aparece em vermelho
+  root.append(svg('defs', {},
+    // degradê da área: forte junto à linha, some no zero (e o vermelho some para baixo)
+    svg('linearGradient', { id: 'tl-fill', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: PAD.t, y2: zeroY },
+      svg('stop', { offset: 0, class: 'fill-a' }), svg('stop', { offset: 1, class: 'fill-b' })),
+    svg('linearGradient', { id: 'tl-fill-neg', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: zeroY, y2: bottom },
+      svg('stop', { offset: 0, class: 'fill-neg-b' }), svg('stop', { offset: 1, class: 'fill-neg-a' })),
+    svg('clipPath', { id: 'tl-above' }, svg('rect', { x: 0, y: 0, width: W, height: zeroY })),
+    svg('clipPath', { id: 'tl-below' }, svg('rect', { x: 0, y: zeroY, width: W, height: H - zeroY }))));
 
-  // marcador do próximo salário
+  // área leve entre a linha e o zero: azul acima, vermelha abaixo
+  const last = x(pts.length - 1).toFixed(1);
+  const area = `${path('spending')}L${last},${zeroY.toFixed(1)}L${x(0).toFixed(1)},${zeroY.toFixed(1)}Z`;
+  root.append(svg('path', { d: area, class: 'area', 'clip-path': 'url(#tl-above)' }));
+  if (negative) root.append(svg('path', { d: area, class: 'area under', 'clip-path': 'url(#tl-below)' }));
+
+  // única referência do eixo y: o zero
+  root.append(svg('line', { x1: PAD.l, x2: W - PAD.r + 4, y1: zeroY, y2: zeroY, class: 'zero' }));
+  overlay.push(label('chart-y', 'R$ 0', { y: zeroY }));
+
+  // a linha: saldo se gastar o limite todo dia
+  root.append(svg('path', { d: path('spending'), class: 'line', 'clip-path': 'url(#tl-above)' }));
+  if (negative) root.append(svg('path', { d: path('spending'), class: 'line under', 'clip-path': 'url(#tl-below)' }));
+
+  // eixo x: hoje, próximo salário (marquinha no pé) e fim
   const salIdx = ctx.budget.nextSalary ? pts.findIndex((p) => p.date === ctx.budget.nextSalary.date) : -1;
-  if (salIdx >= 0) {
-    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: PAD.t - 4, y2: PAD.t + ih, class: 'salary-line' }));
-    root.append(svg('text', { x: x(salIdx), y: PAD.t - 8, class: 'axis strong', 'text-anchor': 'middle' }, ctx.budget.nextSalary.name));
+  overlay.push(label('chart-x start', 'hoje', { x: x(0) }));
+  if (salIdx >= 8 && salIdx < pts.length - 8) {
+    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: bottom - 3, y2: bottom + 4, class: 'salary-tick' }));
+    overlay.push(label('chart-x strong', `salário ${formatShort(pts[salIdx].date)}`, { x: x(salIdx) }));
   }
+  overlay.push(label('chart-x end', formatShort(pts[pts.length - 1].date), { x: x(pts.length - 1) }));
 
-  root.append(svg('path', { d: path('events'), class: 'line s1' }));
-  root.append(svg('path', { d: path('spending'), class: 'line s2' }));
+  // seleção: linha vertical + ponto; o valor aparece no painel acima
+  const cross = svg('line', { y1: PAD.t, y2: bottom, class: 'cross' });
+  const dot = svg('circle', { r: 5, class: 'dot' });
+  root.append(cross, dot);
 
-  // dias de recebimento (▲ acima da linha) e de pagamento (▼ abaixo)
-  pts.forEach((p, i) => {
-    const flows = p.dayEvents.map((e) => flowInto(e, ids));
-    const cx = x(i);
-    const cy = y(p.events);
-    if (flows.some((f) => f > 0)) root.append(svg('path', { d: `M${cx - 5},${cy - 6}L${cx + 5},${cy - 6}L${cx},${cy - 14}Z`, class: 'mk in' }));
-    if (flows.some((f) => f < 0)) root.append(svg('path', { d: `M${cx - 5},${cy + 6}L${cx + 5},${cy + 6}L${cx},${cy + 14}Z`, class: 'mk out' }));
-  });
-
-  // eixo x: hoje, salário e fim
-  const labels = new Map([[0, 'hoje'], [pts.length - 1, formatShort(pts[pts.length - 1].date)]]);
-  if (salIdx > 0 && salIdx < pts.length - 6) labels.set(salIdx, formatShort(pts[salIdx].date));
-  for (const [i, t] of labels) {
-    root.append(svg('text', {
-      x: x(i), y: H - 6, class: 'axis',
-      'text-anchor': i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle',
-    }, t));
-  }
-
-  // seleção: linha vertical + pontos; os valores aparecem no painel acima
-  const cross = svg('line', { y1: PAD.t, y2: PAD.t + ih, class: 'cross' });
-  const dot1 = svg('circle', { r: 4.5, class: 'dot s1' });
-  const dot2 = svg('circle', { r: 4.5, class: 'dot s2' });
-  root.append(cross, dot1, dot2);
+  const note = negative ? h('p', { class: 'chart-note' }, 'Abaixo de R$ 0, em vermelho, faltaria dinheiro.') : null;
 
   const rDate = h('p', { class: 'readout-date' });
-  const rRel = h('span', { class: 'muted small' });
-  const rV1 = h('span', { class: 'v' });
-  const rV2 = h('span', { class: 'v' });
+  const rRel = h('span', { class: 'readout-rel' });
+  const rValue = h('span', { class: 'readout-value' });
   const rEvents = h('p', { class: 'readout-events' });
   const readout = h('div', { class: 'readout', 'aria-live': 'polite' },
-    h('div', { class: 'row between' }, rDate, rRel),
-    h('div', { class: 'readout-rows' },
-      h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Se não gastar nada'), rV1,
-      h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Se gastar o limite todo dia'), rV2),
+    h('div', { class: 'readout-head' }, rDate, rRel),
+    h('div', { class: 'readout-main' }, rValue, h('span', { class: 'readout-caption' }, 'de saldo, se gastar o limite todo dia')),
     rEvents);
 
   let current = 0;
   const select = (i) => {
     current = i;
     const p = pts[i];
-    for (const el of [cross]) { el.setAttribute('x1', x(i)); el.setAttribute('x2', x(i)); }
-    dot1.setAttribute('cx', x(i)); dot1.setAttribute('cy', y(p.events));
-    dot2.setAttribute('cx', x(i)); dot2.setAttribute('cy', y(p.spending));
+    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i));
+    dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(p.spending));
+    dot.classList.toggle('under', p.spending < 0);
     rDate.textContent = formatLong(p.date);
     rRel.textContent = relative(ctx.today, p.date);
-    rV1.textContent = formatBRL(p.events);
-    rV2.textContent = formatBRL(p.spending);
-    rV2.classList.toggle('neg', p.spending < 0);
-    rEvents.textContent = p.dayEvents.map((e) => `${e.name} ${formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })}`).join(' · ');
+    rValue.textContent = formatBRL(p.spending);
+    rValue.classList.toggle('neg', p.spending < 0);
+    rEvents.replaceChildren(...(p.dayEvents.length ? [] : [h('span', { class: 'muted' }, 'Nenhum evento neste dia')]), ...p.dayEvents.map((e) => {
+      const sign = e.kind === 'income' ? 1 : -1;
+      return h('span', { class: 'ev-item' }, h('span', { class: 'li-sub' }, e.name),
+        h('span', { class: `ev-amt ${sign > 0 ? 'pos' : ''}` }, formatSigned(e.amount, sign, { short: true })));
+    }));
     root.setAttribute('aria-valuenow', i);
-    root.setAttribute('aria-valuetext', `${formatLong(p.date)}: ${formatBRL(p.events)} se não gastar nada, ${formatBRL(p.spending)} se gastar o limite`);
+    root.setAttribute('aria-valuetext', `${formatLong(p.date)}: ${formatBRL(p.spending)} de saldo, se gastar o limite todo dia`);
   };
   const pick = (clientX) => {
     const r = root.getBoundingClientRect();
@@ -143,17 +152,7 @@ function chart(ctx, proj) {
   // começa mostrando a véspera do salário (o ponto mais apertado do período)
   select(Math.max(0, pts.findIndex((p) => p.date === ctx.budget.horizonEnd)));
 
-  return { readout, chart: h('div', { class: 'chart-wrap' }, root) };
-}
-
-// mesmos triângulos desenhados no gráfico
-const marker = (dir) => svg('svg', { width: 12, height: 10, viewBox: '0 0 12 10', 'aria-hidden': 'true' },
-  svg('path', { d: dir === 'in' ? 'M1 9L11 9L6 1Z' : 'M1 1L11 1L6 9Z', class: `mk-key ${dir}` }));
-
-function legend() {
-  return h('div', { class: 'legend' },
-    h('span', {}, marker('in'), 'Recebimento'),
-    h('span', {}, marker('out'), 'Pagamento'));
+  return { readout, note, chart: h('div', { class: 'chart-wrap' }, root, overlay) };
 }
 
 function eventList(ctx, proj) {
@@ -191,7 +190,7 @@ export function renderTimeline(ctx) {
     h('section', { class: 'card' },
       c.readout,
       c.chart,
-      legend()),
+      c.note),
     h('h2', { class: 'section-label' }, 'Próximos eventos'),
     h('section', { class: 'card flush' }, eventList(ctx, proj),
       addButton('Agendar receita', () => editIncome(null, { draft: { rule: { type: 'once', date: addDays(ctx.today, 1) } } }))));
