@@ -22,7 +22,7 @@ function label(cls, text, { x, y } = {}) {
 
 function chart(ctx, proj) {
   const pts = proj.points;
-  const values = pts.flatMap((p) => [p.events, p.spending]);
+  const values = pts.map((p) => p.spending);
   let min = Math.min(0, ...values);
   let max = Math.max(...values);
   const padY = (max - min) * 0.08 || 1000;
@@ -33,9 +33,7 @@ function chart(ctx, proj) {
   const bottom = PAD.t + ih;
   const x = (i) => PAD.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
   const y = (v) => PAD.t + ih - ((v - min) / (max - min)) * ih;
-  const seg = (list, key, first) => list.map(([p, i], n) => `${n || !first ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
-  const indexed = pts.map((p, i) => [p, i]);
-  const path = (key) => seg(indexed, key, true);
+  const path = (key) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
   const zeroY = y(0);
   const negative = values.some((v) => v < 0);
   const overlay = [];
@@ -52,18 +50,19 @@ function chart(ctx, proj) {
     svg('clipPath', { id: 'tl-above' }, svg('rect', { x: 0, y: 0, width: W, height: zeroY })),
     svg('clipPath', { id: 'tl-below' }, svg('rect', { x: 0, y: zeroY, width: W, height: H - zeroY }))));
 
-  // a faixa: entre "sem gastar nada" (borda de cima) e "gastando o limite" (borda de baixo)
-  const band = `${path('events')}${seg([...indexed].reverse(), 'spending', false)}Z`;
-  root.append(svg('path', { d: band, class: 'band', 'clip-path': 'url(#tl-above)' }));
-  if (negative) root.append(svg('path', { d: band, class: 'band under', 'clip-path': 'url(#tl-below)' }));
+  // área leve entre a linha e o zero: azul acima, vermelha abaixo
+  const last = x(pts.length - 1).toFixed(1);
+  const area = `${path('spending')}L${last},${zeroY.toFixed(1)}L${x(0).toFixed(1)},${zeroY.toFixed(1)}Z`;
+  root.append(svg('path', { d: area, class: 'area', 'clip-path': 'url(#tl-above)' }));
+  if (negative) root.append(svg('path', { d: area, class: 'area under', 'clip-path': 'url(#tl-below)' }));
 
   // única referência do eixo y: o zero
   root.append(svg('line', { x1: PAD.l, x2: W - PAD.r + 4, y1: zeroY, y2: zeroY, class: 'zero' }));
   overlay.push(label('chart-y', 'R$ 0', { y: zeroY }));
 
-  root.append(svg('path', { d: path('spending'), class: 'line s2', 'clip-path': 'url(#tl-above)' }));
-  if (negative) root.append(svg('path', { d: path('spending'), class: 'line s2 under', 'clip-path': 'url(#tl-below)' }));
-  root.append(svg('path', { d: path('events'), class: 'line s1' }));
+  // a linha: saldo se gastar o limite todo dia
+  root.append(svg('path', { d: path('spending'), class: 'line', 'clip-path': 'url(#tl-above)' }));
+  if (negative) root.append(svg('path', { d: path('spending'), class: 'line under', 'clip-path': 'url(#tl-below)' }));
 
   // eixo x: hoje, próximo salário (marquinha no pé) e fim
   const salIdx = ctx.budget.nextSalary ? pts.findIndex((p) => p.date === ctx.budget.nextSalary.date) : -1;
@@ -74,26 +73,20 @@ function chart(ctx, proj) {
   }
   overlay.push(label('chart-x end', formatShort(pts[pts.length - 1].date), { x: x(pts.length - 1) }));
 
-  // seleção: linha vertical + pontos; os valores aparecem no painel acima
+  // seleção: linha vertical + ponto; o valor aparece no painel acima
   const cross = svg('line', { y1: PAD.t, y2: bottom, class: 'cross' });
-  const dot1 = svg('circle', { r: 5, class: 'dot s1' });
-  const dot2 = svg('circle', { r: 5, class: 'dot s2' });
-  root.append(cross, dot2, dot1);
+  const dot = svg('circle', { r: 5, class: 'dot' });
+  root.append(cross, dot);
 
-  const note = h('p', { class: 'chart-note' },
-    'A faixa mostra onde seu saldo pode estar: em cima, se você não gastar nada; embaixo, se gastar o limite todo dia.',
-    negative && ' Abaixo de R$ 0, em vermelho, faltaria dinheiro.');
+  const note = negative ? h('p', { class: 'chart-note' }, 'Abaixo de R$ 0, em vermelho, faltaria dinheiro.') : null;
 
   const rDate = h('p', { class: 'readout-date' });
   const rRel = h('span', { class: 'readout-rel' });
-  const rV1 = h('span', { class: 'v' });
-  const rV2 = h('span', { class: 'v' });
+  const rValue = h('span', { class: 'readout-value' });
   const rEvents = h('p', { class: 'readout-events' });
   const readout = h('div', { class: 'readout', 'aria-live': 'polite' },
     h('div', { class: 'readout-head' }, rDate, rRel),
-    h('div', { class: 'readout-stats' },
-      h('div', { class: 'stat' }, h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Sem gastar nada'), rV1),
-      h('div', { class: 'stat' }, h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Gastando o limite'), rV2)),
+    h('div', { class: 'readout-main' }, rValue, h('span', { class: 'readout-caption' }, 'de saldo, se gastar o limite todo dia')),
     rEvents);
 
   let current = 0;
@@ -101,21 +94,19 @@ function chart(ctx, proj) {
     current = i;
     const p = pts[i];
     cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i));
-    dot1.setAttribute('cx', x(i)); dot1.setAttribute('cy', y(p.events));
-    dot2.setAttribute('cx', x(i)); dot2.setAttribute('cy', y(p.spending));
-    dot2.classList.toggle('under', p.spending < 0);
+    dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(p.spending));
+    dot.classList.toggle('under', p.spending < 0);
     rDate.textContent = formatLong(p.date);
     rRel.textContent = relative(ctx.today, p.date);
-    rV1.textContent = formatBRL(p.events);
-    rV2.textContent = formatBRL(p.spending);
-    rV2.classList.toggle('neg', p.spending < 0);
+    rValue.textContent = formatBRL(p.spending);
+    rValue.classList.toggle('neg', p.spending < 0);
     rEvents.replaceChildren(...(p.dayEvents.length ? [] : [h('span', { class: 'muted' }, 'Nenhum evento neste dia')]), ...p.dayEvents.map((e) => {
       const sign = e.kind === 'income' ? 1 : -1;
       return h('span', { class: 'ev-item' }, h('span', { class: 'li-sub' }, e.name),
         h('span', { class: `ev-amt ${sign > 0 ? 'pos' : ''}` }, formatSigned(e.amount, sign, { short: true })));
     }));
     root.setAttribute('aria-valuenow', i);
-    root.setAttribute('aria-valuetext', `${formatLong(p.date)}: ${formatBRL(p.events)} se não gastar nada, ${formatBRL(p.spending)} se gastar o limite`);
+    root.setAttribute('aria-valuetext', `${formatLong(p.date)}: ${formatBRL(p.spending)} de saldo, se gastar o limite todo dia`);
   };
   const pick = (clientX) => {
     const r = root.getBoundingClientRect();
