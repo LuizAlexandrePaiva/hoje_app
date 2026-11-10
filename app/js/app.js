@@ -95,6 +95,9 @@ window.addEventListener('hashchange', render);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDay(); });
 setInterval(checkDay, 60 * 1000);
 window.addEventListener('resize', () => fitText());
+// valores grandes são medidos de novo quando a fonte do app termina de carregar
+document.fonts?.ready.then(() => fitText());
+document.fonts?.addEventListener?.('loadingdone', () => fitText());
 render();
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

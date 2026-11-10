@@ -3,8 +3,8 @@
 import { h, sheet, amount } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
-import { formatBRL, formatBRLShort, formatPercent } from '../../core/money.js';
-import { formatHeader, formatShort, formatFull, relative, addDays, TIME_ZONE } from '../../core/dates.js';
+import { formatBRL, formatBRLShort, formatSigned, formatPercent } from '../../core/money.js';
+import { formatHeader, formatDayMonth, relative, addDays, TIME_ZONE } from '../../core/dates.js';
 import { openEvents, pendingConfirmations } from '../../core/schedule.js';
 import { confirmOccurrenceSheet, transferSheet, eventSheet, transactionSheet, savingSheet, TX_LABEL } from '../editors.js';
 import { backupBanner } from '../backup.js';
@@ -16,13 +16,14 @@ export function refillSheet(ctx) {
   const { refill } = ctx;
   const to = store.getAccount(refill.toAccountId);
   const span = refill.cutByIncome
-    ? `até ${refill.cutByIncome.name} cair (${formatShort(refill.cutByIncome.date)})`
+    ? `até ${refill.cutByIncome.name} cair (${formatDayMonth(refill.cutByIncome.date)})`
     : `${refill.periodDays} dias de gastos`;
   transferSheet({
     from: refill.fromAccountId,
     to: refill.toAccountId,
     amount: refill.amount,
     title: 'Registrar resgate',
+    okLabel: 'Registrar resgate',
     desc: 'Resgate',
     note: `Valor sugerido para ${to?.name ?? 'a conta'} cobrir ${span}`
       + (refill.commitments ? `, já com ${formatBRL(refill.commitments)} de contas a pagar` : '')
@@ -30,8 +31,8 @@ export function refillSheet(ctx) {
   });
 }
 
-/** 08/11; com o ano quando não é o de hoje (a conta olha 12 meses à frente). */
-const dayLabel = (date, today) => (date.slice(0, 4) === today.slice(0, 4) ? formatShort(date) : formatFull(date));
+/** "8 de nov" em frases; com o ano quando não é o de hoje (a conta olha 12 meses à frente). */
+const dayLabel = (date, today) => formatDayMonth(date, Number(today.slice(0, 4)));
 
 /** "Salário", "Salário e Aluguel" ou "3 receitas". */
 function pendingNames(list) {
@@ -49,7 +50,7 @@ function noRoomText(b) {
       ? `O saldo está ${formatBRL(short)} abaixo da margem de segurança.`
       : `As contas até ${day} usam ${formatBRL(short)} da margem de segurança.`;
   }
-  return `As contas até ${day} passam do que você tem.`;
+  return `Faltam ${formatBRL(b.shortfall)} para pagar as contas previstas até ${day}.`;
 }
 
 /** A conta que leva ao limite do dia, passo a passo. */
@@ -72,9 +73,9 @@ function explainSheet(ctx) {
     h('p', { class: 'sheet-lead' }, tight),
     h('div', { class: 'calc' },
       row(b.spentToday > 0 ? 'Saldo no começo do dia' : 'Saldo nas contas de gasto', formatBRL(b.spendableStart)),
-      b.cushion > 0 && row('Margem de segurança', `−${formatBRL(b.cushion)}`),
-      u.incomes > 0 && row('Receitas previstas', `+${formatBRL(u.incomes)}`),
-      u.outflows > 0 && row('Despesas fixas e aportes', `−${formatBRL(u.outflows)}`),
+      b.cushion > 0 && row('Margem de segurança', formatSigned(b.cushion, -1)),
+      u.incomes > 0 && row('Receitas previstas', formatSigned(u.incomes, 1)),
+      u.outflows > 0 && row('Despesas fixas e aportes', formatSigned(u.outflows, -1)),
       row(u.days === 1 ? 'Dias' : `Dias até ${day}`, `÷ ${u.days}`),
       h('span', { class: 'rule' }),
       row('Limite por dia', formatBRL(b.dailyBudget), `total ${b.dailyBudget < 0 ? 'neg' : ''}`)),
@@ -93,19 +94,20 @@ function hero(ctx) {
   const over = !noRoom && remainingToday < 0;
   const held = !noRoom && !over && heldToday > 0; // parte do limite espera a confirmação de uma receita
   const left = dailyBudget > 0 ? Math.min(100, Math.max(0, (remainingToday / dailyBudget) * 100)) : 0;
-  const label = noRoom ? 'Sem folga hoje' : over ? 'Passou do limite' : 'Resta para gastar';
+  const label = noRoom ? `Sem folga até ${dayLabel(b.limitingDay, b.today)}` : over ? 'Passou do limite' : 'Resta para gastar';
   const tone = noRoom || over ? 'neg' : remainingToday > 0 ? 'pos' : '';
   return h('section', { class: 'hero', 'aria-label': 'Quanto resta para gastar hoje' },
     h('div', { class: 'hero-top' },
       h('p', { class: 'hero-label' }, label),
       h('button', { class: 'icon-btn', 'aria-label': 'Como o limite é calculado', onclick: () => explainSheet(ctx) }, icon('info', { size: 20 }))),
-    amount(formatBRL(over ? -remainingToday : remainingToday), `hero-value ${tone}`, { 'data-fit': true }),
+    amount(formatBRL(noRoom ? 0 : over ? -remainingToday : remainingToday), `hero-value ${tone}`, { 'data-fit': true }),
     h('div', {
       class: `meter ${over || noRoom ? 'over' : ''}`, role: 'progressbar', 'aria-label': 'Quanto do limite de hoje ainda resta',
       'aria-valuenow': Math.round(left), 'aria-valuemin': 0, 'aria-valuemax': 100,
     }, h('span', { style: `width:${left}%` })),
     noRoom
-      ? h('p', { class: 'hero-foot' }, noRoomText(b))
+      ? [h('p', { class: 'hero-foot' }, noRoomText(b)),
+        h('button', { class: 'btn small quiet hero-link', onclick: () => ctx.navigate('#/linha') }, 'Ver contas na Linha do tempo', icon('chevron', { size: 16 }))]
       : h('p', { class: 'hero-foot' },
         h('span', {}, spentToday > 0 ? `Gastou ${formatBRL(spentToday)} de ${formatBRL(dailyBudget)}` : 'Nada gasto hoje'),
         h('span', { class: 'tomorrow' }, 'Amanhã ', h('strong', { class: ctx.tomorrow.dailyBudget < 0 ? 'neg' : '' }, formatBRL(ctx.tomorrow.dailyBudget)))),
@@ -123,7 +125,7 @@ function pendingCard(ctx) {
         h('span', { class: 'dot warn', 'aria-hidden': 'true' }),
         h('span', { class: 'li-main' },
           h('span', { class: 'li-title' }, e.name),
-          h('span', { class: 'li-sub' }, `${formatBRLShort(e.amount)}, ${e.overdue ? `previsto para ${formatShort(e.date)}` : 'previsto para hoje'}`)),
+          h('span', { class: 'li-sub' }, `${formatBRLShort(e.amount)}, ${e.overdue ? `previsto para ${dayLabel(e.date, ctx.today)}` : 'previsto para hoje'}`)),
         h('button', { class: 'btn small tonal-warn', 'aria-label': `Confirmar ${e.name}`, onclick: () => confirmOccurrenceSheet(e) }, 'Confirmar')))),
   ];
 }
@@ -183,7 +185,7 @@ function accountCard(ctx) {
         h('span', { class: 'li-sub' }, `Dá para aplicar ${formatBRLShort(surplus.amount)} em ${reserve?.name}`)),
       h('button', {
         class: 'btn small',
-        onclick: () => transferSheet({ from: surplus.fromAccountId, to: surplus.toAccountId, amount: surplus.amount, title: 'Aplicar excedente', desc: 'Aplicação do excedente' }),
+        onclick: () => transferSheet({ from: surplus.fromAccountId, to: surplus.toAccountId, amount: surplus.amount, title: 'Aplicar excedente', okLabel: 'Aplicar', desc: 'Aplicação do excedente' }),
       }, 'Aplicar')));
 }
 
@@ -198,7 +200,7 @@ function nextIncome(ctx) {
         h('span', { class: 'li-title' }, next.name),
         h('span', { class: 'li-sub' }, relative(ctx.today, next.date))),
       h('span', { class: 'li-end' },
-        h('span', { class: 'li-value pos' }, `+${formatBRLShort(next.amount)}`),
+        h('span', { class: 'li-value pos' }, formatSigned(next.amount, 1, { short: true })),
         icon('chevron', { size: 18, cls: 'chev' }))));
 }
 
@@ -216,8 +218,8 @@ function todayEntries(ctx) {
             h('span', { class: `li-title ${t.desc ? '' : 'muted'}` }, t.desc || TX_LABEL[t.type]),
             sub(t) && h('span', { class: 'li-sub' }, sub(t))),
           t.type === 'income'
-            ? h('span', { class: 'li-value pos' }, `+${formatBRL(t.amount)}`)
-            : h('span', { class: 'li-value' }, `−${formatBRL(t.amount)}`)))))),
+            ? h('span', { class: 'li-value pos' }, formatSigned(t.amount, 1))
+            : h('span', { class: 'li-value' }, formatSigned(t.amount, -1))))))),
   ];
 }
 

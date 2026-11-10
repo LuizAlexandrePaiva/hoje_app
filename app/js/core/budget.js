@@ -121,6 +121,9 @@ export function computeDailyBudget(state, today) {
   const series = flowSeries(events, today, lookDays);
   const r = sustainableRate(base, series, 0, lookDays);
   const dailyBudget = r.rate;
+  const available = base + r.incomes - r.outflows; // dinheiro no dia mais apertado
+  // quando as contas previstas passam do dinheiro: quanto falta, no total, até o dia mais apertado
+  const shortfall = available < 0 ? -available : 0;
 
   // Entradas de hoje ou atrasadas, ainda não confirmadas: o limite conta com
   // elas, mas até a confirmação só fica liberado o que caberia sem elas.
@@ -152,7 +155,8 @@ export function computeDailyBudget(state, today) {
     lookDays,
     limitingDay: addDays(today, r.k),
     // a conta que define o limite: (saldo − margem + entradas − saídas) ÷ dias, até o dia mais apertado
-    untilLimit: { days: r.k + 1, incomes: r.incomes, outflows: r.outflows, available: base + r.incomes - r.outflows },
+    untilLimit: { days: r.k + 1, incomes: r.incomes, outflows: r.outflows, available },
+    shortfall,
     nextSalary: salary,
   };
 }

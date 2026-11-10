@@ -254,3 +254,17 @@ test('untilLimit: a conta que explica o limite fecha com o próprio limite', () 
   assert.equal(Math.round(u.available / u.days), later.dailyBudget);
   assert.ok(u.incomes > 0);
 });
+
+test('sem folga: shortfall é o total que falta no dia mais apertado', () => {
+  const s = scenario();
+  s.accounts.find((a) => a.id === 'cdb').balance = 0; // gastável = R$ 64
+  s.expenses.push({ id: 'alu', name: 'Aluguel', amount: 90000, accountId: 'cc', day: 30, exceptions: {}, since: TODAY });
+  const b = computeDailyBudget(s, TODAY);
+  assert.ok(b.dailyBudget < 0);
+  assert.equal(b.limitingDay, '2026-10-30');
+  assert.equal(b.shortfall, 90000 - 6400); // R$ 836,00
+});
+
+test('com folga, shortfall é zero', () => {
+  assert.equal(computeDailyBudget(scenario(), TODAY).shortfall, 0);
+});

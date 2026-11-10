@@ -206,7 +206,7 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 127 testes com o executor nativo do Node, sem dependências externas.
+São 132 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|
@@ -247,7 +247,7 @@ Abra o app uma vez com internet; depois disso ele funciona offline. Use sempre o
 
 **Publicar uma nova versão:** ao alterar qualquer arquivo em `app/`, aumente `CACHE_VERSION` em [`app/sw.js`](app/sw.js) e `APP_VERSION` em [`app/js/version.js`](app/js/version.js). O celular baixa a nova versão na primeira abertura e a exibe na seguinte.
 
-**Ícones:** `python3 tools/gen-icons.py` gera os PNGs (requer Pillow e a fonte Inter).
+**Ícones:** `python3 tools/gen-icons.py` gera os PNGs (requer Pillow; usa a fonte do app em `app/fonts/`).
 
 **Convenções**
 

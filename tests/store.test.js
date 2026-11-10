@@ -163,3 +163,18 @@ test('guardar parte de uma receita: valida antes de mexer em qualquer saldo', ()
   store.deleteTransaction(t.id); // desfeita: pode guardar de novo
   assert.ok(store.saveFromIncome(inc.id, 3000, 'fundo'));
 });
+
+test('"Não veio" pode ser desfeito: a ocorrência volta a ser prevista', () => {
+  const ev = { key: 'income:sal:2026-11', kind: 'income', accountId: 'cc', name: 'Salário', amount: 250000 };
+  store.skipOccurrence(ev);
+  assert.equal(store.getState().settled[ev.key].skipped, true);
+  store.unskipOccurrence(ev);
+  assert.equal(store.getState().settled[ev.key], undefined);
+});
+
+test('accountUsage lista nomes prontos para uma frase', () => {
+  const uses = store.accountUsage('cc');
+  assert.ok(uses.includes('Salário'));
+  assert.ok(uses.includes('Fatura do cartão'));
+  assert.ok(uses.includes('1 aporte planejado'));
+});

@@ -31,10 +31,10 @@ function warnNegative(accountId, undo) {
       refill.amount > 0 && h('div', { class: 'stat right' }, h('span', { class: 'stat-label' }, 'Resgate sugerido'), h('span', { class: 'stat-value' }, formatBRLShort(refill.amount)))),
     h('p', { class: 'sheet-lead' }, refill.amount > 0
       ? `Traga o valor de ${reserve?.name} para cobrir o saldo e os próximos dias.`
-      : 'Não há saldo na reserva para resgatar.'),
+      : 'A reserva está sem saldo para resgatar. Ajuste o saldo ou lance uma receita quando o dinheiro entrar.'),
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn grow', onclick: close }, 'Agora não'),
-      refill.amount > 0 && h('button', { class: 'btn warn grow', onclick: () => refillSheet({ refill }) }, 'Resgatar')),
+      refill.amount > 0 && h('button', { class: 'btn warn grow', onclick: () => refillSheet({ refill }) }, `Resgatar ${formatBRLShort(refill.amount)}`)),
     // esta folha tira da tela o aviso com "Desfazer": a ação continua aqui
     h('button', { class: 'btn quiet block', onclick: () => { close(); undo(); } }, 'Desfazer o gasto'),
   ]), 350);
@@ -64,8 +64,8 @@ export function renderSpend(ctx) {
     autocapitalize: 'sentences', enterkeyhint: 'done',
   });
   const scheduleBtn = h('button', {
-    class: 'icon-btn schedule-btn', 'aria-label': 'Agendar para outro dia', title: 'Agendar para outro dia', onclick: schedule,
-  }, icon('calendar', { size: 22 }));
+    class: 'btn small schedule-btn', 'aria-label': 'Agendar para outro dia', onclick: schedule,
+  }, icon('calendar', { size: 18 }), 'Outro dia');
   const accountLabel = h('span', { class: 'chips-label' });
   const confirmBtn = h('button', { class: 'btn primary xl block', disabled: true, onclick: save });
 

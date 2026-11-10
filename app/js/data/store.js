@@ -82,7 +82,7 @@ export function commit(mutator) {
 // ---------- validação / backup ----------
 
 function normalize(data) {
-  if (!data || typeof data !== 'object') throw new Error('Arquivo inválido');
+  if (!data || typeof data !== 'object') throw new Error('O arquivo não é um backup do Hoje.');
   const base = emptyState(data.createdAt);
   const s = { ...base, ...data };
   s.settings = { ...base.settings, ...(data.settings || {}) };
@@ -94,7 +94,7 @@ function normalize(data) {
   if (!s.settled || typeof s.settled !== 'object') s.settled = {};
   if (!s.moved || typeof s.moved !== 'object') s.moved = {};
   for (const a of s.accounts) {
-    if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('Conta inválida no backup');
+    if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('O backup tem uma conta com dados incompletos.');
   }
   s.invoices = sanitizeInvoices(s.invoices, s.expenses, NAME_MAX);
   return s;
@@ -108,7 +108,7 @@ export function importJSON(text) {
   const data = JSON.parse(text);
   // só troca os dados por algo que tem a forma de um backup (antes, um JSON qualquer apagava tudo)
   if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.accounts) || (data.app && data.app !== 'hoje')) {
-    throw new Error('Este arquivo não é um backup do Hoje');
+    throw new Error('O arquivo não é um backup do Hoje.');
   }
   replaceState(data);
 }
@@ -217,6 +217,11 @@ export function skipSaving(incomeId, skipped = true) {
   });
 }
 
+/** Desfaz um "Não veio" / "Pular": a ocorrência volta a ser prevista. */
+export function unskipOccurrence(event) {
+  commit((s) => { if (s.settled[event.key]?.skipped) delete s.settled[event.key]; });
+}
+
 /** Dá ou troca o nome de um lançamento (vazio remove o nome). */
 export function renameTransaction(id, name) {
   commit((s) => {
@@ -269,11 +274,13 @@ export function remove(collection, id) {
 
 /** O que impede apagar uma conta (itens que a usam). */
 export function accountUsage(id) {
+  // nomes do que depende da conta, prontos para uma frase: "Salário, Fatura do cartão e 1 aporte planejado"
   const uses = [];
-  state.incomes.filter((x) => x.accountId === id).forEach((x) => uses.push(`receita "${x.name}"`));
-  state.expenses.filter((x) => x.accountId === id).forEach((x) => uses.push(`despesa "${x.name}"`));
-  state.goals.filter((x) => x.accountId === id).forEach((x) => uses.push(`meta "${x.name}"`));
-  state.contributions.filter((x) => x.fromAccountId === id).forEach(() => uses.push('aporte planejado'));
+  state.incomes.filter((x) => x.accountId === id).forEach((x) => uses.push(x.name));
+  state.expenses.filter((x) => x.accountId === id).forEach((x) => uses.push(x.name));
+  state.goals.filter((x) => x.accountId === id).forEach((x) => uses.push(`a meta ${x.name}`));
+  const contribs = state.contributions.filter((x) => x.fromAccountId === id).length;
+  if (contribs) uses.push(contribs === 1 ? '1 aporte planejado' : `${contribs} aportes planejados`);
   return uses;
 }
 

@@ -1,7 +1,7 @@
 // Assistente do primeiro acesso: cadastra contas, receitas, despesas, metas
 // e parâmetros. Cada passo salva no aparelho, então dá para fechar e voltar.
 
-import { h, toast } from '../dom.js';
+import { h } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { accountsList, incomesList, expensesList, goalsList, contributionsList } from '../editors.js';
@@ -71,9 +71,10 @@ export function renderSetup(ctx) {
   const cur = STEPS[step];
   const last = step === STEPS.length - 1;
 
+  const err = h('p', { class: 'form-error', role: 'alert' });
   const next = () => {
     const ok = cur.valid ? cur.valid(state) : true;
-    if (ok !== true) return toast(ok);
+    if (ok !== true) { err.textContent = ok; return; }
     if (last) {
       store.finishSetup();
       ctx.navigate('#/hoje', { replace: true });
@@ -84,11 +85,15 @@ export function renderSetup(ctx) {
   };
 
   return h('div', { class: 'screen setup' },
-    step > 0 && h('div', { class: 'steps', 'aria-hidden': 'true' }, STEPS.slice(1).map((_, i) => h('span', { class: i < step ? 'on' : '' }))),
-    step > 0 && h('p', { class: 'step-count' }, `Passo ${step} de ${STEPS.length - 1}`),
+    step > 0 && h('div', {
+      class: 'steps', role: 'progressbar', 'aria-label': 'Configuração',
+      'aria-valuemin': 1, 'aria-valuemax': STEPS.length - 1, 'aria-valuenow': step, 'aria-valuetext': `Passo ${step} de ${STEPS.length - 1}`,
+    }, STEPS.slice(1).map((_, i) => h('span', { class: i < step ? 'on' : '' }))),
+    step > 0 && h('p', { class: 'step-count', 'aria-hidden': 'true' }, `Passo ${step} de ${STEPS.length - 1}`),
     cur.title && h('header', { class: 'screen-head' }, h('div', { class: 'titles' }, h('h1', {}, cur.title), cur.lead && h('p', { class: 'sub' }, cur.lead))),
     cur.tips && h('div', { class: 'stack-sm' }, cur.tips.map(tip)),
     cur.render(state),
+    err,
     step === 0
       ? h('div', { class: 'setup-nav column' },
         h('button', { class: 'btn primary xl', onclick: next }, cur.next),

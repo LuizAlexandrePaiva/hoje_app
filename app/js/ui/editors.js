@@ -1,11 +1,11 @@
 // Formulários (em folha modal) e listas editáveis de contas, receitas,
 // despesas fixas, metas e aportes. Usados no assistente inicial e em Ajustes.
 
-import { h, sheet, closeSheet, toast, confirmDialog, afterSheetClosed, amount as moneyText } from './dom.js';
+import { h, sheet, closeSheet, toast, confirmDialog, afterSheetClosed, joinList, amount as moneyText } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
-import { formatBRL, formatBRLShort, formatPercent, parseBRL, toInput } from '../core/money.js';
-import { todayISO, formatFull, formatShort, formatDayMonth, formatMonth, shiftMonth, monthKey, relative, isValidISO, addDays, TIME_ZONE } from '../core/dates.js';
+import { formatBRL, formatBRLShort, formatSigned, formatPercent, parseBRL, toInput } from '../core/money.js';
+import { todayISO, formatDayMonth, formatMonth, shiftMonth, monthKey, relative, isValidISO, addDays, TIME_ZONE } from '../core/dates.js';
 import { MAX_MOVE_DAYS, occurrenceByKey, currentInvoices } from '../core/schedule.js';
 import { invoiceKey, parseInvoiceKey } from '../core/invoice.js';
 import { computeDailyBudget, withDelta } from '../core/budget.js';
@@ -68,22 +68,54 @@ function segmented(options, value, onChange) {
   return { el: h('div', { class: 'segmented', role: 'group' }, buttons), get value() { return current; } };
 }
 
-/** Campo numérico curto alinhado à direita do rótulo. */
-export function inlineField(title, input, sub) {
+/**
+ * Campo numérico curto alinhado à direita do rótulo. `unit` aparece dentro do
+ * campo, depois do número ("dias") ou antes, com `prefix` ("R$").
+ */
+export function inlineField(title, input, sub, { unit, prefix = false } = {}) {
+  const control = unit ? h('span', { class: `unit ${prefix ? 'prefix' : ''}`, 'data-unit': unit }, input) : input;
   return h('label', { class: 'inline-field' },
     h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, title), sub && h('span', { class: 'li-sub' }, sub)),
-    input);
+    control);
 }
 
 function more(label, ...children) {
   return h('details', { class: 'more' }, h('summary', {}, label), h('div', {}, ...children));
 }
 
-function errorBox() {
+export function errorBox() {
   return h('p', { class: 'form-error', role: 'alert' });
 }
 
-function fail(box, msg) {
+/**
+ * Mostra o erro. Com `input`, a mensagem vai para logo abaixo do campo, o campo
+ * fica marcado como inválido e recebe o foco; sem `input`, fica no fim do formulário.
+ */
+export function fail(box, msg, input) {
+  if (box._input) {
+    box._input.removeAttribute('aria-invalid');
+    box._input.removeAttribute('aria-describedby');
+    box._input = null;
+  }
+  if (!box._home && box.parentNode) box._home = { parent: box.parentNode, next: box.nextSibling };
+  if (input) {
+    if (!box.id) box.id = `erro-${Math.random().toString(36).slice(2, 8)}`;
+    const holder = input.closest('.field, .inline-field');
+    if (holder) holder.append(box);
+    input.setAttribute('aria-invalid', 'true');
+    input.setAttribute('aria-describedby', box.id);
+    box._input = input;
+    input.focus();
+    input.addEventListener('input', () => {
+      if (box._input !== input) return;
+      input.removeAttribute('aria-invalid');
+      input.removeAttribute('aria-describedby');
+      box._input = null;
+      box.textContent = '';
+    }, { once: true });
+  } else if (box._home && box.parentNode !== box._home.parent) {
+    box._home.parent.insertBefore(box, box._home.next);
+  }
   box.textContent = msg;
   return false;
 }
@@ -111,20 +143,20 @@ const KIND_HINT = {
   goal: 'Fica fora do orçamento (metas e investimentos).',
 };
 
-export function editAccount(account, { draft, onSaved } = {}) {
+export function editAccount(account, { draft, kind: presetKind, onSaved } = {}) {
   const isNew = !account;
-  const a = account || { name: '', kind: 'spending', balance: 0, ...draft };
+  const a = account || { name: '', kind: presetKind || 'spending', balance: 0, ...draft };
   const name = textInput(a.name, { placeholder: 'Ex.: Conta corrente' });
   const kindHint = h('span', { class: 'field-hint' }, KIND_HINT[a.kind]);
   const kind = segmented([['spending', 'De gasto'], ['goal', 'De meta']], a.kind, (v) => { kindHint.textContent = KIND_HINT[v]; });
   const balance = moneyInput(isNew ? null : a.balance);
   const err = errorBox();
   sheet(isNew ? 'Nova conta' : 'Editar conta', (close) => form(() => {
-    if (!name.value.trim()) return fail(err, 'Dê um nome à conta.');
+    if (!name.value.trim()) return fail(err, 'Dê um nome à conta.', name);
     const item = { ...a, name: name.value.trim(), kind: kind.value };
     if (isNew) {
       const v = balance.value.trim() === '' ? 0 : parseBRL(balance.value);
-      if (Number.isNaN(v)) return fail(err, 'Saldo inválido.');
+      if (Number.isNaN(v)) return fail(err, 'Use só números, como 1.250,00 ou -80.', balance);
       item.balance = v;
     }
     const saved = store.upsert('accounts', item);
@@ -134,7 +166,7 @@ export function editAccount(account, { draft, onSaved } = {}) {
   h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Tipo'), kind.el, kindHint),
   isNew
     ? field('Saldo hoje', balance, 'Negativo? Use o sinal de menos.')
-    : h('p', { class: 'field-hint' }, `Saldo atual: ${formatBRL(a.balance)}. Para corrigir, use “Ajustar saldo”.`),
+    : h('p', { class: 'field-hint' }, `Saldo atual: ${formatBRL(a.balance)}. Para corrigir, use “Ajustar saldo” na ficha da conta.`),
   err,
   actions(!isNew && (() => deleteAccount(a, (msg) => fail(err, msg))))));
 }
@@ -142,7 +174,7 @@ export function editAccount(account, { draft, onSaved } = {}) {
 /** Exclui uma conta, se nada depender dela. `onBlocked` recebe o motivo. */
 export async function deleteAccount(a, onBlocked = toast) {
   const uses = store.accountUsage(a.id);
-  if (uses.length) return onBlocked(`Em uso por: ${uses.join(', ')}. Altere-os antes.`);
+  if (uses.length) return onBlocked(`Esta conta é usada por ${joinList(uses)}. Troque a conta deles para poder excluir.`);
   if (await confirmDialog('Excluir conta?', `“${a.name}” sai da lista. O histórico continua.`, 'Excluir', true)) {
     store.remove('accounts', a.id);
     toast('Conta excluída');
@@ -171,7 +203,7 @@ function exceptionsEditor(exceptions = {}) {
     for (const row of rows.children) {
       const { month, cents } = row._read();
       if (!month) continue;
-      if (Number.isNaN(cents)) throw new Error('Confira o valor das exceções.');
+      if (Number.isNaN(cents)) throw new Error('Em “Valor diferente em um mês”, use só números, como 2.800,00.');
       out[month] = cents;
     }
     return out;
@@ -229,15 +261,15 @@ export function editIncome(income, { draft, onSaved } = {}) {
   sync(i.rule.type);
   const err = errorBox();
   sheet(isNew ? (i.rule.type === 'once' ? 'Agendar receita' : 'Nova receita') : 'Editar receita', (close) => form(() => {
-    if (!name.value.trim()) return fail(err, 'Dê um nome à receita.');
+    if (!name.value.trim()) return fail(err, 'Dê um nome à receita.', name);
     const v = parseBRL(amount.value);
-    if (Number.isNaN(v) || v < 0) return fail(err, 'Informe o valor.');
+    if (Number.isNaN(v) || v < 0) return fail(err, 'Informe o valor.', amount);
     const type = ruleType.value;
     if (type === 'once') {
       const d = onceDate.value;
       const changed = isNew || i.rule.type !== 'once' || d !== i.rule.date;
-      if (!isValidISO(d)) return fail(err, 'Escolha a data.');
-      if (changed && d < today) return fail(err, 'Para receita que já caiu, use “Lançar” e escolha Receita.');
+      if (!isValidISO(d)) return fail(err, 'Escolha a data.', onceDate);
+      if (changed && d < today) return fail(err, 'Essa data já passou. Para uma receita que já caiu, use o botão + e escolha Receita.', onceDate);
       const saved = store.upsert('incomes', {
         ...i, name: name.value.trim(), amount: v, accountId: account.value,
         isSalary: false, rule: { type: 'once', date: d }, exceptions: {},
@@ -248,9 +280,9 @@ export function editIncome(income, { draft, onSaved } = {}) {
     const rule = type === 'businessDay'
       ? { type: 'businessDay', n: Number(n.value), countSaturday: sat.input.checked }
       : { type: 'fixedDay', day: Number(day.value) };
-    if (rule.type === 'businessDay' && !(rule.n >= 1 && rule.n <= 23)) return fail(err, 'O dia útil vai de 1 a 23.');
-    if (rule.type === 'fixedDay' && !(rule.day >= 1 && rule.day <= 31)) return fail(err, 'O dia vai de 1 a 31.');
-    if (!isValidISO(since.value)) return fail(err, 'Confira a data de início.');
+    if (rule.type === 'businessDay' && !(rule.n >= 1 && rule.n <= 23)) return fail(err, 'Use um dia útil de 1 a 23.', n);
+    if (rule.type === 'fixedDay' && !(rule.day >= 1 && rule.day <= 31)) return fail(err, 'Use um dia de 1 a 31.', day);
+    if (!isValidISO(since.value)) { moreOpts.open = true; return fail(err, 'Escolha a data de início.', since); }
     let exceptions;
     try { exceptions = exc.read(); } catch (e) { return fail(err, e.message); }
     const saved = store.upsert('incomes', {
@@ -260,7 +292,7 @@ export function editIncome(income, { draft, onSaved } = {}) {
     if (onSaved) afterSheetClosed(() => onSaved(saved)); else close();
   },
   field('Nome', name),
-  h('div', { class: 'field-row' }, field('Valor', amount), field('Cai em', account)),
+  h('div', { class: 'field-row' }, field('Valor', amount), field('Entra em', account)),
   h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Quando cai'), ruleType.el),
   nRow, dayRow, onceRow, sat.el, salary.el,
   moreOpts,
@@ -291,15 +323,16 @@ export function editExpense(expense) {
   syncCard();
   // fatura que está por pagar (só para cartão já salvo, fora da configuração inicial)
   const current = !isNew && e.isCard && state.setupDone ? currentInvoices(state, todayISO()).find((o) => o.sourceId === e.id) : null;
+  const moreOpts = more('Mais opções', exc.el, field('Contar a partir de', since, 'Já pagou a deste mês? Use uma data após o vencimento.'));
   const hasInvoices = !isNew && Object.keys(state.invoices).some((k) => parseInvoiceKey(k)?.expenseId === e.id);
   const err = errorBox();
   sheet(isNew ? 'Nova despesa fixa' : 'Editar despesa fixa', (close) => form(() => {
-    if (!name.value.trim()) return fail(err, 'Dê um nome à despesa.');
+    if (!name.value.trim()) return fail(err, 'Dê um nome à despesa.', name);
     const v = parseBRL(amount.value);
-    if (Number.isNaN(v) || v < 0) return fail(err, 'Informe o valor.');
+    if (Number.isNaN(v) || v < 0) return fail(err, 'Informe o valor.', amount);
     const d = Number(day.value);
-    if (!(d >= 1 && d <= 31)) return fail(err, 'O dia vai de 1 a 31.');
-    if (!isValidISO(since.value)) return fail(err, 'Confira a data de início.');
+    if (!(d >= 1 && d <= 31)) return fail(err, 'Use um dia de 1 a 31.', day);
+    if (!isValidISO(since.value)) { moreOpts.open = true; return fail(err, 'Escolha a data de início.', since); }
     let exceptions;
     try { exceptions = exc.read(); } catch (x) { return fail(err, x.message); }
     const saved = store.upsert('expenses', { ...e, name: name.value.trim(), amount: v, accountId: account.value, day: d, exceptions, since: since.value, isCard: card.input.checked });
@@ -314,7 +347,7 @@ export function editExpense(expense) {
   inlineField('Dia do vencimento', day),
   card.el,
   current && h('button', { type: 'button', class: 'btn block', onclick: () => invoiceSheet(current.key) }, 'Abrir fatura'),
-  more('Mais opções', exc.el, field('Contar a partir de', since, 'Já pagou a deste mês? Use uma data após o vencimento.')),
+  moreOpts,
   err,
   actions(!isNew && (async () => {
     const msg = hasInvoices ? `“${e.name}” deixa de ser prevista e as faturas dela são apagadas.` : `“${e.name}” deixa de ser prevista.`;
@@ -327,7 +360,10 @@ export function editExpense(expense) {
 export function editGoal(goal) {
   const state = store.getState();
   const goalAccounts = accountOptions(state, 'goal');
-  if (!goalAccounts.length) return toast('Crie antes uma conta do tipo “de meta”.');
+  if (!goalAccounts.length) {
+    // sem conta de meta: cria a conta primeiro e segue para a meta
+    return editAccount(null, { kind: 'goal', onSaved: () => editGoal() });
+  }
   const isNew = !goal;
   const g = goal || { name: '', target: null, deadline: '', accountId: goalAccounts[0][0] };
   const name = textInput(g.name, { placeholder: 'Ex.: Viagem' });
@@ -336,10 +372,10 @@ export function editGoal(goal) {
   const account = select(goalAccounts, g.accountId);
   const err = errorBox();
   sheet(isNew ? 'Nova meta' : 'Editar meta', (close) => form(() => {
-    if (!name.value.trim()) return fail(err, 'Dê um nome à meta.');
+    if (!name.value.trim()) return fail(err, 'Dê um nome à meta.', name);
     const v = parseBRL(target.value);
-    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe quanto quer juntar.');
-    if (!isValidISO(deadline.value)) return fail(err, 'Informe o prazo.');
+    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe quanto quer juntar.', target);
+    if (!isValidISO(deadline.value)) return fail(err, 'Escolha o prazo.', deadline);
     store.upsert('goals', { ...g, name: name.value.trim(), target: v, deadline: deadline.value, accountId: account.value });
     close();
   },
@@ -361,11 +397,12 @@ export function editContribution(contribution, goalId) {
   const date = dateInput(c.date);
   const from = select(accountOptions(state, 'spending'), c.fromAccountId);
   const err = errorBox();
-  const done = state.settled[`contribution:${c.id}`];
+  const settledC = state.settled[`contribution:${c.id}`];
+  const done = settledC && !settledC.skipped;
   sheet(isNew ? 'Novo aporte' : 'Editar aporte', (close) => form(() => {
     const v = parseBRL(amount.value);
-    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.');
-    if (!isValidISO(date.value)) return fail(err, 'Informe a data.');
+    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.', amount);
+    if (!isValidISO(date.value)) return fail(err, 'Escolha a data.', date);
     store.upsert('contributions', { ...c, amount: v, date: date.value, fromAccountId: from.value });
     close();
   },
@@ -383,12 +420,12 @@ export function editContribution(contribution, goalId) {
 export function adjustSheet(account) {
   const balance = moneyInput(account.balance);
   const err = errorBox();
-  sheet(`Ajustar ${account.name}`, (close) => form(() => {
+  sheet(`Ajustar saldo: ${account.name}`, (close) => form(() => {
     const v = parseBRL(balance.value);
-    if (Number.isNaN(v)) return fail(err, 'Valor inválido.');
+    if (Number.isNaN(v)) return fail(err, 'Use só números, como 1.250,00 ou -80.', balance);
     const t = store.adjustBalance(account.id, v);
     close();
-    toast(t ? `Saldo ajustado (${t.amount > 0 ? '+' : '−'}${formatBRL(Math.abs(t.amount))})` : 'Saldo já estava certo');
+    toast(t ? `Saldo ajustado (${t.amount > 0 ? '+' : '−'}${formatBRL(Math.abs(t.amount))})` : 'O saldo já estava certo');
   },
   h('p', { class: 'sheet-lead' }, 'Digite o saldo que o banco mostra agora.'),
   field('Saldo real', balance),
@@ -396,7 +433,7 @@ export function adjustSheet(account) {
   actions(null, 'Salvar saldo')));
 }
 
-export function transferSheet({ from, to, amount, title = 'Transferir', desc = '', note } = {}) {
+export function transferSheet({ from, to, amount, title = 'Transferir', okLabel = 'Transferir', desc = '', note } = {}) {
   const state = store.getState();
   const opts = accountOptions(state);
   const fromSel = select(opts, from || state.settings.reserveAccountId || opts[0]?.[0]);
@@ -405,8 +442,8 @@ export function transferSheet({ from, to, amount, title = 'Transferir', desc = '
   const err = errorBox();
   sheet(title, (close) => form(() => {
     const v = parseBRL(value.value);
-    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.');
-    if (fromSel.value === toSel.value) return fail(err, 'Escolha contas diferentes.');
+    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.', value);
+    if (fromSel.value === toSel.value) return fail(err, 'Escolha contas diferentes em De e Para.', toSel);
     store.transfer(fromSel.value, toSel.value, v, desc);
     close();
     toast(`${formatBRL(v)} transferidos`);
@@ -415,13 +452,21 @@ export function transferSheet({ from, to, amount, title = 'Transferir', desc = '
   field('Valor', value),
   h('div', { class: 'field-row' }, field('De', fromSel), field('Para', toSel)),
   err,
-  actions(null, 'Confirmar')));
+  actions(null, okLabel)));
 }
 
+// "Aporte: Viagem" → "Viagem", para perguntas como "Fez o aporte para Viagem?"
+const plainName = (event) => (event.kind === 'contribution' ? event.name.replace(/^Aporte:\s*/, '') : event.name);
+const ASK_TITLE = {
+  income: (e) => `Recebeu ${plainName(e)}?`,
+  expense: (e) => `Pagou ${plainName(e)}?`,
+  contribution: (e) => `Fez o aporte para ${plainName(e)}?`,
+};
+
 const CONFIRM = {
-  income: { title: 'Recebeu?', ok: 'Confirmar recebimento', skip: 'Não veio', where: 'Entra em', early: 'Já recebi' },
+  income: { title: 'Recebeu?', ok: 'Confirmar recebimento', skip: 'Não veio este mês', where: 'Entra em', early: 'Já recebi' },
   expense: { title: 'Pagou?', ok: 'Confirmar pagamento', skip: 'Pular este mês', where: 'Sai de', early: 'Já paguei' },
-  contribution: { title: 'Fez o aporte?', ok: 'Confirmar aporte', skip: 'Pular', where: 'Sai de', early: 'Já aportei' },
+  contribution: { title: 'Fez o aporte?', ok: 'Confirmar aporte', skip: 'Pular este aporte', where: 'Sai de', early: 'Já aportei' },
 };
 
 const yearOf = (d) => Number(d.slice(0, 4));
@@ -455,8 +500,8 @@ export function moveSheet(event) {
   const moved = !isContribution && event.date !== base;
   sheet('Mudar a data', (close) => form(() => {
     const d = date.value;
-    if (!isValidISO(d) || d < earliest) return fail(err, `Escolha de hoje em diante. Se já aconteceu, use “${cfg.early}”.`);
-    if (latest && d > latest) return fail(err, `Até ${formatDayMonth(latest, ref)}. Se não vier, use “${cfg.skip}”.`);
+    if (!isValidISO(d) || d < earliest) return fail(err, `Escolha de hoje em diante. Se já aconteceu, use “${cfg.early}”.`, date);
+    if (latest && d > latest) return fail(err, `Escolha até ${formatDayMonth(latest, ref)}. Se não for acontecer, use “${cfg.skip}”.`, date);
     store.moveOccurrence(event, d);
     close();
     toast(`${event.name}: ${formatDayMonth(d, ref)}`);
@@ -478,22 +523,27 @@ export function confirmOccurrenceSheet(event) {
   const date = dateInput(event.date <= today ? event.date : today, { max: today });
   const err = errorBox();
   const acc = store.getAccount(event.accountId);
-  sheet(`${event.name}: ${cfg.title.toLowerCase()}`, (close) => form(() => {
+  const ref = yearOf(today);
+  sheet(ASK_TITLE[event.kind](event), (close) => form(() => {
     const v = parseBRL(amount.value);
-    if (Number.isNaN(v) || v < 0) return fail(err, 'Valor inválido.');
-    if (!isValidISO(date.value) || date.value > today) return fail(err, 'A data não pode ser futura.');
+    if (Number.isNaN(v) || v < 0) return fail(err, 'Use só números, como 2.500,00.', amount);
+    if (!isValidISO(date.value) || date.value > today) return fail(err, 'Escolha hoje ou uma data passada. Se ainda vai acontecer, use “Vai ser em outro dia”.', date);
     const t = store.confirmOccurrence(event, { amount: v, date: date.value });
     close();
     const tip = event.kind === 'income' ? savingTip(t) : {};
     toast(`${event.name}: ${formatBRL(v)} registrado${tip.note || ''}`, tip.action);
   },
-  h('p', { class: 'sheet-lead' }, `Previsto para ${formatShort(event.date)}. ${cfg.where} ${acc?.name ?? 'conta excluída'}.`),
+  h('p', { class: 'sheet-lead' }, `Previsto para ${formatDayMonth(event.date, ref)}. ${cfg.where} ${acc?.name ?? 'conta excluída'}.`),
   h('div', { class: 'field-row' }, field('Valor', amount), field('Data', date)),
   err,
   h('div', { class: 'form-actions' },
     h('button', {
       type: 'button', class: 'btn',
-      onclick: () => { store.skipOccurrence(event); close(); toast(`${event.name}: marcado como não ocorrido`); },
+      onclick: () => {
+        store.skipOccurrence(event);
+        close();
+        toast(`${plainName(event)}: marcado como não ocorrido`, { label: 'Desfazer', run: () => { store.unskipOccurrence(event); toast(`${plainName(event)} voltou a ser previsto`); } });
+      },
     }, cfg.skip),
     h('button', { type: 'submit', class: 'btn primary' }, cfg.ok)),
   h('button', { type: 'button', class: 'btn quiet block', onclick: () => moveSheet(event) }, 'Vai ser em outro dia')));
@@ -555,9 +605,9 @@ export function savingSheet(txId) {
   sheet('Guardar parte?', (close) => form(() => {
     if (!goals.length) return createAccount();
     const v = read();
-    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.');
-    if (v > s.cap) return fail(err, `No máximo ${formatBRL(s.cap)}, ${formatPercent(SAVINGS.capBps)} do que entrou.`);
-    if (v > from.balance) return fail(err, `${from.name} tem só ${formatBRL(from.balance)}.`);
+    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.', value);
+    if (v > s.cap) return fail(err, `No máximo ${formatBRL(s.cap)}, ${formatPercent(SAVINGS.capBps)} do que entrou.`, value);
+    if (v > from.balance) return fail(err, `${from.name} tem só ${formatBRL(from.balance)}.`, value);
     const to = store.getAccount(toSel ? toSel.value : s.to);
     const t = to && store.saveFromIncome(tx.id, v, to.id);
     if (!t) { close(); return toast('Esta sugestão não está mais disponível.'); }
@@ -603,7 +653,7 @@ export function addButton(label, onclick) {
 
 function listCard(title, items, emptyText, onAdd, addLabel) {
   return h('section', { class: 'card flush' },
-    title && h('div', { class: 'card-head', style: 'padding-top:12px' }, h('h3', { class: 'card-title' }, title)),
+    title && h('div', { class: 'card-head list-head' }, h('h2', { class: 'card-title' }, title)),
     items.length ? h('ul', { class: 'list' }, items) : h('p', { class: 'empty' }, emptyText),
     addButton(addLabel, onAdd));
 }
@@ -666,7 +716,7 @@ export function contributionsList(state, title = 'Aportes planejados') {
 function pickGoalThenContribution(state) {
   if (state.goals.length === 1) return editContribution(null, state.goals[0].id);
   sheet('Para qual meta?', () => h('ul', { class: 'list' },
-    state.goals.map((g) => listItem(g.name, `Até ${formatFull(g.deadline)}`, null, () => editContribution(null, g.id)))));
+    state.goals.map((g) => listItem(g.name, `Até ${formatDayMonth(g.deadline, Number(todayISO().slice(0, 4)))}`, null, () => editContribution(null, g.id)))));
 }
 
 // ---------- lançamentos: nome, renomear e excluir ----------
@@ -694,7 +744,7 @@ export function transactionSheet(t) {
   const acc = (id) => store.getAccount(id)?.name ?? 'conta excluída';
   const isMove = t.type === 'transfer' || t.type === 'contribution';
   const where = isMove ? `de ${acc(t.from)} para ${acc(t.to)}` : t.from ? `de ${acc(t.from)}` : `em ${acc(t.to)}`;
-  const when = `${formatShort(t.date)}${t.createdAt && isSpend ? ` às ${txTime.format(new Date(t.createdAt))}` : ''}`;
+  const when = `${formatDayMonth(t.date, yearOf(todayISO()))}${t.createdAt && (isSpend || t.type === 'income') ? `, ${txTime.format(new Date(t.createdAt))}` : ''}`;
   const savedOf = t.type === 'income' ? store.getState().transactions.filter((x) => x.savingOf === t.id).reduce((sum, x) => sum + x.amount, 0) : 0;
   sheet(t.desc || label, (close) => form(() => {
     const next = name.value.trim();
@@ -849,7 +899,7 @@ function invoiceItemSheet(key, item) {
   /** Salva o que está no formulário; devolve o gasto, false (valor inválido) ou null (fatura sumiu). */
   const save = () => {
     const v = parseBRL(value.value);
-    if (!Number.isSafeInteger(v) || v <= 0) return fail(err, 'Informe o valor.');
+    if (!Number.isSafeInteger(v) || v <= 0) return fail(err, 'Informe o valor.', value);
     try {
       const input = { name: name.value, amount: v };
       const saved = isNew ? store.addInvoiceItem(key, input) : store.updateInvoiceItem(key, item.id, input);

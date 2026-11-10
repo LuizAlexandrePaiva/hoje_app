@@ -127,7 +127,7 @@ async function push() {
         handlers.onConflict?.({ updatedAt: r.data.updatedAt });
         return;
       }
-      throw new Error(`Servidor respondeu ${r.status}`);
+      throw new Error(`O servidor não respondeu como esperado (erro ${r.status}). Tente de novo em alguns minutos.`);
     }
   } catch (e) {
     failed(e);
@@ -149,7 +149,7 @@ async function pull() {
       await push();
       return;
     }
-    if (meta.status !== 200) throw new Error(`Servidor respondeu ${meta.status}`);
+    if (meta.status !== 200) throw new Error(`O servidor não respondeu como esperado (erro ${meta.status}). Tente de novo em alguns minutos.`);
     if (meta.data.rev === cfg.rev) {
       cfg.lastSyncAt = new Date().toISOString();
       saveCfg();
@@ -162,7 +162,7 @@ async function pull() {
       return;
     }
     const full = await api('GET', id);
-    if (full.status !== 200) throw new Error(`Servidor respondeu ${full.status}`);
+    if (full.status !== 200) throw new Error(`O servidor não respondeu como esperado (erro ${full.status}). Tente de novo em alguns minutos.`);
     apply(await decrypt(full.data.data, key), full.data.rev);
     setStatus('synced');
     handlers.onRemoteApplied?.();

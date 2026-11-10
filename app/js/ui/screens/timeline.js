@@ -2,8 +2,8 @@
 
 import { h, svg, amountParts } from '../dom.js';
 import { icon } from '../icons.js';
-import { formatBRL, formatBRLShort } from '../../core/money.js';
-import { formatShort, formatLong, relative, addDays } from '../../core/dates.js';
+import { formatBRL, formatSigned } from '../../core/money.js';
+import { formatShort, formatLong, formatDayMonth, relative, addDays } from '../../core/dates.js';
 import { projectBalance } from '../../core/projection.js';
 import { spendingAccountIds } from '../../core/budget.js';
 import { flowInto } from '../../core/schedule.js';
@@ -64,9 +64,10 @@ function chart(ctx, proj) {
     stop(0, '--pos', top), stop(zero, '--pos', base), stop(zero, '--neg', base), stop(1, '--neg', top));
 
   const lowest = pts.reduce((a, b) => (b.value < a.value ? b : a));
+  const dm = (d) => formatDayMonth(d, Number(ctx.today.slice(0, 4)));
   const root = svg('svg', {
     viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', tabindex: 0,
-    'aria-label': `Saldo previsto das contas de gasto: ${formatBRL(proj.start)} agora, ${formatBRL(pts[pts.length - 1].value)} em ${formatShort(proj.end)}. Menor saldo: ${formatBRL(lowest.value)} em ${formatShort(lowest.date)}.`,
+    'aria-label': `Saldo previsto das contas de gasto: ${formatBRL(proj.start)} agora, ${formatBRL(pts[pts.length - 1].value)} em ${dm(proj.end)}. Menor saldo: ${formatBRL(lowest.value)} em ${dm(lowest.date)}.`,
   });
   root.append(svg('defs', {}, gradient('tl-line', 1, 1), gradient('tl-area', 0.3, 0)));
   // verde acima de zero, vermelho abaixo: a cor da linha é o estado do saldo
@@ -115,7 +116,7 @@ function chart(ctx, proj) {
     rValue.replaceChildren(...amountParts(formatBRL(p.value)));
     rValue.classList.toggle('neg', p.value < 0);
     rEvents.textContent = p.events.length
-      ? p.events.map((e) => `${flowInto(e, ids) >= 0 && e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)} ${e.name}`).join('   ')
+      ? p.events.map((e) => `${formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })} ${e.name}`).join('   ')
       : touched ? '' : 'Toque no gráfico para ver cada dia';
   };
   const pick = (clientX) => {
@@ -135,7 +136,11 @@ function chart(ctx, proj) {
   });
   select(0);
 
-  return { readout, chart: h('div', { class: 'chart-wrap' }, root) };
+  // o que passa abaixo de zero ganha uma frase: a cor sozinha não explica
+  const firstNeg = pts.find((p) => p.value < 0);
+  const note = firstNeg && h('p', { class: 'chart-note' },
+    `Em ${dm(firstNeg.date)} o saldo fica negativo: as contas previstas passam do que você tem, mesmo gastando só o limite.`);
+  return { readout, note, chart: h('div', { class: 'chart-wrap' }, root) };
 }
 
 function eventList(ctx, proj) {
@@ -149,8 +154,8 @@ function eventList(ctx, proj) {
   const accName = (id) => store.getAccount(id)?.name ?? 'conta excluída';
   // conta só aparece quando não é a dos gastos do dia; atraso sempre aparece
   const sub = (e) => {
-    if (e.overdue) return `Atrasado, previsto para ${formatShort(e.date)}`;
-    if (e.originalDate && e.date !== e.originalDate) return `Data mudada, era ${formatShort(e.originalDate)}`;
+    if (e.overdue) return `Atrasado, previsto para ${formatDayMonth(e.date, Number(ctx.today.slice(0, 4)))}`;
+    if (e.originalDate && e.date !== e.originalDate) return `Data mudada, era ${formatDayMonth(e.originalDate, Number(ctx.today.slice(0, 4)))}`;
     if (e.accountId === def) return null;
     return e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
   };
@@ -159,7 +164,7 @@ function eventList(ctx, proj) {
     h('ul', { class: 'list' }, evs.map((e) => h('li', {}, h('button', { class: 'list-item', onclick: () => eventSheet(e) },
       h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: `li-sub ${e.overdue ? 'warn-text' : ''}` }, sub(e))),
       h('span', { class: 'li-end' },
-        h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` }, `${e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)}`),
+        h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` }, formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })),
         icon('chevron', { size: 18, cls: 'chev' })))))))));
 }
 
@@ -171,7 +176,7 @@ export function renderTimeline(ctx) {
       h('div', { class: 'titles' },
         h('h1', {}, 'Linha do tempo'),
         h('p', { class: 'sub' }, 'Saldo previsto, gastando o limite de cada dia'))),
-    h('section', { class: 'card chart-card' }, c.readout, c.chart),
+    h('section', { class: 'card chart-card' }, c.readout, c.chart, c.note),
     h('h2', { class: 'section-label' }, 'Próximos eventos'),
     h('section', { class: 'card flush' }, eventList(ctx, proj),
       addButton('Agendar receita', () => editIncome(null, { draft: { rule: { type: 'once', date: addDays(ctx.today, 1) } } }))));

@@ -5,7 +5,7 @@ import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
 import { formatDayMonth, diffDays, relative } from '../../core/dates.js';
-import { editGoal, editContribution, addButton } from '../editors.js';
+import { editGoal, editContribution, editAccount, confirmOccurrenceSheet, addButton } from '../editors.js';
 import { pendingConfirmations } from '../../core/schedule.js';
 
 function goalCard(ctx, g) {
@@ -20,14 +20,15 @@ function goalCard(ctx, g) {
   const planned = contribs.filter((c) => !state.settled[`contribution:${c.id}`]).reduce((s, c) => s + c.amount, 0);
   const gapAfter = missing - planned;
   const shared = state.goals.filter((x) => x.accountId === g.accountId).length > 1;
-  const pendingKeys = new Set(pendingConfirmations(state, today).map((e) => e.key));
+  const pending = new Map(pendingConfirmations(state, today).map((e) => [e.key, e]));
   const reached = missing === 0;
   const late = !reached && days < 0;
 
   // estado em uma etiqueta: verde só quando atingida, vermelho só com prazo vencido
   const status = reached ? h('span', { class: 'badge pos' }, 'Atingida')
     : late ? h('span', { class: 'badge neg' }, 'Prazo vencido')
-      : h('span', { class: 'badge' }, days === 0 ? 'Vence hoje' : days === 1 ? '1 dia restante' : `${days} dias restantes`);
+      : days === 0 ? h('span', { class: 'badge warn' }, 'Prazo hoje')
+        : h('span', { class: 'badge' }, `Prazo em ${days} ${days === 1 ? 'dia' : 'dias'}`);
 
   const plan = reached ? null
     : planned > 0
@@ -52,26 +53,36 @@ function goalCard(ctx, g) {
     shared && h('p', { class: 'caption' }, `${acc?.name} é usada por mais de uma meta. O progresso mostra o saldo total.`),
     h('div', { class: 'card inset' },
       contribs.length > 0 && h('ul', { class: 'list' }, contribs.map((c) => {
-        const done = state.settled[`contribution:${c.id}`];
-        const st = done ? h('span', { class: 'badge pos' }, 'Feito')
-          : pendingKeys.has(`contribution:${c.id}`) ? h('span', { class: 'badge warn' }, 'Confirmar') : null;
-        return h('li', {}, h('button', { class: 'list-item', onclick: () => editContribution(c) },
-          h('span', { class: 'li-main' },
-            h('span', { class: 'row gap-sm' }, h('span', { class: 'li-title' }, `Aporte em ${formatDayMonth(c.date, year)}`), st),
-            h('span', { class: 'li-sub' }, done ? `Saiu de ${store.getAccount(c.fromAccountId)?.name ?? 'conta excluída'}` : relative(today, c.date))),
+        const settled = state.settled[`contribution:${c.id}`];
+        const done = settled && !settled.skipped;
+        const due = pending.get(`contribution:${c.id}`);
+        const sub = settled?.skipped ? h('span', { class: 'li-sub' }, 'Pulado')
+          : done ? h('span', { class: 'li-sub pos' }, `Feito, saiu de ${store.getAccount(c.fromAccountId)?.name ?? 'conta excluída'}`)
+            : due ? h('span', { class: 'li-sub' }, h('span', { class: 'status warn-text' }, icon('alert', { size: 15 }), 'A confirmar'))
+              : h('span', { class: 'li-sub' }, relative(today, c.date));
+        // aporte que já chegou na data abre a confirmação, como na tela Hoje
+        const open = due ? () => confirmOccurrenceSheet(due) : () => editContribution(c);
+        return h('li', {}, h('button', { class: 'list-item', onclick: open },
+          h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, `Aporte em ${formatDayMonth(c.date, year)}`), sub),
           h('span', { class: 'li-end' }, h('span', { class: 'li-value' }, formatBRLShort(c.amount)), icon('chevron', { size: 18, cls: 'chev' }))));
       })),
       addButton('Novo aporte', () => editContribution(null, g.id))));
+}
+
+function emptyState(ctx) {
+  const hasGoalAccount = ctx.state.accounts.some((a) => a.kind === 'goal');
+  return h('section', { class: 'card' },
+    h('h2', { class: 'card-title' }, 'Nenhuma meta ainda'),
+    h('p', { class: 'small muted' }, 'Uma meta acompanha o saldo de uma conta de meta. Os aportes saem de uma conta de gasto e já descontam do limite do dia.'),
+    hasGoalAccount
+      ? addButton('Nova meta', () => editGoal())
+      : addButton('Criar conta de meta', () => editAccount(null, { kind: 'goal', onSaved: () => editGoal() })));
 }
 
 export function renderGoals(ctx) {
   const goals = [...ctx.state.goals].sort((a, b) => (a.deadline < b.deadline ? -1 : 1));
   return h('div', { class: 'screen goals' },
     h('header', { class: 'screen-head' }, h('div', { class: 'titles' }, h('h1', {}, 'Metas'))),
-    goals.length
-      ? goals.map((g) => goalCard(ctx, g))
-      : h('section', { class: 'card' },
-        h('p', { class: 'card-title' }, 'Nenhuma meta ainda'),
-        h('p', { class: 'small muted' }, 'Uma meta acompanha o saldo de uma conta “de meta”. Os aportes saem de uma conta de gasto e já descontam do limite do dia.')),
-    h('section', { class: 'card flush' }, addButton('Nova meta', () => editGoal())));
+    goals.length ? goals.map((g) => goalCard(ctx, g)) : emptyState(ctx),
+    goals.length > 0 && h('section', { class: 'card flush' }, addButton('Nova meta', () => editGoal())));
 }
