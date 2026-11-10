@@ -161,6 +161,7 @@ body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
 }
 .hero-foot strong { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
 .hero-note { color: var(--muted); font-size: var(--fs-small); margin-top: 12px; }
+.hero-foot + .hero-note { margin-top: 6px; }
 
 /* barra: a parte cheia é o que ainda resta (do limite ou da meta) */
 .meter { height: 10px; border-radius: 5px; background: var(--surface-3); overflow: hidden; margin-top: 18px; }
@@ -358,6 +359,11 @@ details.more > div { display: flex; flex-direction: column; gap: 16px; padding-b
 .sheet-body { display: flex; flex-direction: column; gap: 16px; padding-bottom: 4px; }
 .sheet-lead { color: var(--muted); font-size: var(--fs-body); }
 
+/* fatura de cartão: troca de mês */
+.month-nav { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; margin: -6px 0; }
+.month-nav > .icon-btn:first-child { justify-content: flex-start; }
+.month-nav > .icon-btn:last-child { justify-content: flex-end; }
+
 /* ---------- toast: resposta do app a uma ação ---------- */
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%);
@@ -449,7 +455,7 @@ body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
 .day-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: var(--fs-small); color: var(--muted); }
 .day-head strong { font-weight: 600; color: var(--text); }
 .day-head strong::first-letter { text-transform: uppercase; }
-.day-group .list-item { min-height: 56px; padding: 8px 0; }
+.day-group .list-item, .invoice-items .list-item, .invoice-items .row-item { min-height: 56px; padding: 8px 0; }
 .day-group .list > li + li { border-top: 0; }
 
 /* transferências: valor neutro com o ícone ⇄ */

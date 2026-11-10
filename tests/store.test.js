@@ -60,7 +60,7 @@ test('receita avulsa entra no saldo na hora, não conta como gasto e tem sugest�
   assert.equal(s.accounts.find((a) => a.id === 'cc').balance, 6400 + 42000);
   const after = computeDailyBudget(s, '2026-10-26');
   assert.equal(after.spentToday, 0);
-  assert.equal(after.dailyBudget, Math.round((237900 + 42000) / 14));
+  assert.equal(after.dailyBudget, Math.round((734900 + 42000) / 42)); // 18498: repartida até 6/12
   assert.ok(after.dailyBudget > before.dailyBudget);
   store.addSpend(1000, 'Café');
   assert.deepEqual(store.recentNames('income'), ['Freela']);
@@ -86,4 +86,30 @@ test('papéis das contas: trocar gastos do dia e reserva, sem reserva, nunca sem
   // conta de meta nunca vira conta de gastos
   store.setAccountRole('cc', 'none');
   assert.equal(st().defaultAccountId, 'cdb');
+});
+
+test('poupança: estado antigo carrega com a regra ligada; guardar e dispensar', async () => {
+  const s0 = store.getState();
+  assert.equal(s0.settings.savingsEnabled, true);
+  assert.equal(s0.settings.savingsAccountId, null);
+  const inc = store.addIncome(250000, 'Salário', 'cc');
+  const p = store.saveFromIncome(inc.id, 25000, 'fundo');
+  const s = store.getState();
+  assert.deepEqual([p.type, p.from, p.to, p.amount, p.desc, p.savingOf], ['transfer', 'cc', 'fundo', 25000, 'Poupança: Salário', inc.id]);
+  assert.equal(s.settings.savingsAccountId, 'fundo');
+  assert.deepEqual(s.accounts.map((a) => a.balance), [6400 + 250000 - 25000, 231500, 390000 + 25000]);
+  store.deleteTransaction(p.id);
+  assert.deepEqual(store.getState().accounts.map((a) => a.balance), [256400, 231500, 390000]);
+  store.skipSaving(inc.id);
+  assert.equal(store.getState().transactions.find((t) => t.id === inc.id).savingSkipped, true);
+  assert.equal(JSON.parse(mem.get('hoje:v1')).transactions.find((t) => t.id === inc.id).savingSkipped, true);
+  store.skipSaving(inc.id, false);
+  assert.equal('savingSkipped' in store.getState().transactions.find((t) => t.id === inc.id), false);
+  assert.equal(store.saveFromIncome('nao-existe', 1000, 'fundo'), null);
+  const semNome = store.addIncome(50000, '', 'cc');
+  assert.equal(store.saveFromIncome(semNome.id, 5000, 'fundo').desc, 'Poupança');
+  // chave desligada sobrevive a salvar e carregar
+  store.updateSettings({ savingsEnabled: false });
+  store.load();
+  assert.equal(store.getState().settings.savingsEnabled, false);
 });

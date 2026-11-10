@@ -4,9 +4,12 @@
 import { applyTransaction, revertTransaction } from './ledger.js';
 import { todayISO, isValidISO } from '../core/dates.js';
 import { DEFAULT_REFILL } from '../core/refill.js';
+import { parseInvoiceKey, sanitizeInvoices } from '../core/invoice.js';
 
 const KEY = 'hoje:v1';
 export const SCHEMA_VERSION = 1;
+/** Tamanho máximo de um nome (lançamento ou gasto de fatura). */
+export const NAME_MAX = 60;
 
 export function emptyState(today = todayISO()) {
   return {
@@ -20,6 +23,9 @@ export function emptyState(today = todayISO()) {
       reserveAccountId: null,
       refill: { ...DEFAULT_REFILL },
       surplusEnabled: true,
+      cushion: 0, // margem de segurança: centavos que o limite nunca usa
+      savingsEnabled: true, // sugerir quanto guardar de cada receita
+      savingsAccountId: null, // última conta de meta usada como destino
     },
     incomes: [],
     expenses: [],
@@ -27,6 +33,7 @@ export function emptyState(today = todayISO()) {
     contributions: [],
     settled: {},
     moved: {}, // datas mudadas de ocorrências: { chave: 'AAAA-MM-DD' }
+    invoices: {}, // faturas de cartão: { chave da ocorrência: { items: [{ id, name, amount }], closed? } }
     transactions: [],
   };
 }
@@ -88,6 +95,7 @@ function normalize(data) {
   for (const a of s.accounts) {
     if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('Conta inválida no backup');
   }
+  s.invoices = sanitizeInvoices(s.invoices, s.expenses, NAME_MAX);
   return s;
 }
 
@@ -177,7 +185,28 @@ export function skipOccurrence(event) {
   commit((s) => { s.settled[event.key] = { date: todayISO(), amount: 0, skipped: true }; });
 }
 
-export const NAME_MAX = 60;
+/** Guarda parte de uma receita: transferência da conta dela para uma conta de meta. */
+export function saveFromIncome(incomeId, amount, toAccountId) {
+  return commit((s) => {
+    const inc = s.transactions.find((t) => t.id === incomeId && t.type === 'income');
+    if (!inc) return null;
+    delete inc.savingSkipped;
+    s.settings.savingsAccountId = toAccountId;
+    return applyTransaction(s, tx({
+      type: 'transfer', amount, from: inc.to, to: toAccountId,
+      desc: inc.desc ? `Poupança: ${inc.desc}`.slice(0, NAME_MAX) : 'Poupança', savingOf: inc.id,
+    }));
+  });
+}
+
+/** "Desta vez não": dispensa (ou reabre) a sugestão de poupança de uma receita. */
+export function skipSaving(incomeId, skipped = true) {
+  commit((s) => {
+    const inc = s.transactions.find((t) => t.id === incomeId);
+    if (!inc) return;
+    if (skipped) inc.savingSkipped = true; else delete inc.savingSkipped;
+  });
+}
 
 /** Dá ou troca o nome de um lançamento (vazio remove o nome). */
 export function renameTransaction(id, name) {
@@ -221,6 +250,10 @@ export function remove(collection, id) {
   commit((s) => {
     s[collection] = s[collection].filter((x) => x.id !== id);
     if (collection === 'goals') s.contributions = s.contributions.filter((c) => c.goalId !== id);
+    if (collection === 'expenses') {
+      // as faturas do cartão saem junto com a despesa
+      for (const key of Object.keys(s.invoices)) if (parseInvoiceKey(key)?.expenseId === id) delete s.invoices[key];
+    }
     if (collection === 'accounts') fixAccountRoles(s);
   });
 }
@@ -293,4 +326,82 @@ export function setSetupStep(step) {
 
 export function finishSetup() {
   commit((s) => { s.setupDone = true; delete s.setupStep; });
+}
+
+// ---------- faturas de cartão ----------
+
+/** A fatura da chave (ou null). Lança se a despesa não existe mais ou deixou de ser cartão. */
+function invoiceOf(s, key) {
+  const p = parseInvoiceKey(key);
+  const exp = p && s.expenses.find((e) => e.id === p.expenseId);
+  if (!exp || !exp.isCard) throw new Error('Esta fatura não existe mais.');
+  return s.invoices[key] || null;
+}
+
+function cleanItem({ name, amount } = {}) {
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Informe o valor.');
+  return { name: String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX), amount };
+}
+
+/** Lança um gasto na fatura (o primeiro cria a fatura). `at` é a posição, para desfazer uma remoção. */
+export function addInvoiceItem(key, input, at = null) {
+  const clean = cleanItem(input);
+  return commit((s) => {
+    const inv = invoiceOf(s, key) || { items: [] };
+    const item = { id: newId('it'), ...clean };
+    const i = Number.isInteger(at) && at >= 0 && at <= inv.items.length ? at : inv.items.length;
+    inv.items.splice(i, 0, item);
+    s.invoices[key] = inv;
+    return item;
+  });
+}
+
+/** Troca nome e valor de um gasto. Devolve o gasto, ou null se ele não existe mais. */
+export function updateInvoiceItem(key, itemId, input) {
+  const clean = cleanItem(input);
+  return commit((s) => {
+    const item = invoiceOf(s, key)?.items.find((x) => x.id === itemId);
+    return item ? Object.assign(item, clean) : null;
+  });
+}
+
+/**
+ * Remove um gasto; sem gastos, a fatura deixa de existir.
+ * Devolve { item, index, closed } (o que "Desfazer" precisa) ou null.
+ */
+export function removeInvoiceItem(key, itemId) {
+  return commit((s) => {
+    const inv = invoiceOf(s, key);
+    const index = inv ? inv.items.findIndex((x) => x.id === itemId) : -1;
+    if (index < 0) return null;
+    const closed = inv.closed === true;
+    const [item] = inv.items.splice(index, 1);
+    if (!inv.items.length) delete s.invoices[key];
+    return { item, index, closed };
+  });
+}
+
+/** Fecha a fatura (o mês passa a valer a soma dos gastos) ou reabre. Devolve se mudou. */
+export function setInvoiceClosed(key, closed) {
+  return commit((s) => {
+    const inv = invoiceOf(s, key);
+    if (!inv || (inv.closed === true) === !!closed) return false;
+    if (closed) inv.closed = true; else delete inv.closed;
+    return true;
+  });
+}
+
+/** Nomes já usados nas faturas de um cartão, dos mais recentes aos mais antigos, sem repetir. */
+export function invoiceNames(expenseId, limit = 20) {
+  const seen = new Set();
+  const out = [];
+  const keys = Object.keys(state.invoices).filter((k) => parseInvoiceKey(k)?.expenseId === expenseId).sort().reverse();
+  for (const k of keys) {
+    const items = state.invoices[k].items;
+    for (let i = items.length - 1; i >= 0 && out.length < limit; i--) {
+      const name = items[i].name;
+      if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); out.push(name); }
+    }
+  }
+  return out;
 }

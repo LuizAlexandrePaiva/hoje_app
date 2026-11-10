@@ -3,8 +3,11 @@ import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import * as sync from '../../data/sync.js';
 import { todayISO } from '../../core/dates.js';
-import { incomesList, expensesList, field, inlineField, switchRow } from '../editors.js';
+import { incomesList, expensesList, field, inlineField, switchRow, moneyInput } from '../editors.js';
+import { parseBRL } from '../../core/money.js';
 import { APP_VERSION } from '../../version.js';
+import { formatBRL } from '../../core/money.js';
+import { savingFloor } from '../../core/savings.js';
 import { cloudSheet, statusText, statusTone } from '../backup.js';
 
 /**
@@ -48,6 +51,35 @@ export function refillSettings(state, { withAccounts = false } = {}) {
       inlineField('Cada resgate cobre', target, 'dias'),
       inlineField('Arredondar para', step, 'múltiplos de R$')),
     surplus.el);
+}
+
+/** Margem de segurança: valor nas contas de gasto que o limite nunca usa. */
+function limitSettings(state) {
+  const input = moneyInput(state.settings.cushion || null, { placeholder: '0', 'aria-label': 'Margem de segurança em reais', maxlength: 12 });
+  input.addEventListener('change', () => {
+    const v = input.value.trim() === '' ? 0 : parseBRL(input.value);
+    if (!Number.isInteger(v) || v < 0) return toast('Valor inválido.');
+    if (v === (state.settings.cushion || 0)) return;
+    store.updateSettings({ cushion: v });
+    toast('Salvo');
+  });
+  return h('section', { class: 'card' },
+    field('Margem de segurança', input, 'O limite nunca usa esse valor. Fica nas contas de gasto para imprevistos.'));
+}
+
+/** Regra de poupança: uma chave e uma linha que mostra os números que a regra está usando. */
+function savingsSettings(ctx) {
+  const on = ctx.state.settings.savingsEnabled !== false;
+  const sw = switchRow('Sugerir poupança', 'A cada receita, quanto dá para guardar. Nunca mais de 10%.', on);
+  sw.input.addEventListener('change', () => { store.updateSettings({ savingsEnabled: sw.input.checked }); toast('Salvo'); });
+  const limit = ctx.budget.dailyBudget;
+  const f = on ? savingFloor(ctx.state, ctx.today, limit) : null;
+  const status = !f ? null
+    : limit <= 0 ? 'Sem folga hoje. As sugestões voltam quando o limite ficar positivo.'
+      : f.basis === 'limit' ? 'Ainda sem 7 dias de gastos lançados. Por enquanto, guardar não baixa o limite em mais de 10%.'
+        : limit < f.floor ? `Mês apertado. O limite de hoje, ${formatBRL(limit)}, está abaixo de 90% do que você costuma gastar (${formatBRL(f.typical)} por dia).`
+          : `Você costuma gastar ${formatBRL(f.typical)} por dia. Depois de guardar, o limite não fica abaixo de ${formatBRL(f.floor)}.`;
+  return h('section', { class: 'card' }, sw.el, status && h('p', { class: 'caption' }, status));
 }
 
 export function exportBackup() {
@@ -118,8 +150,12 @@ export function renderSettings(ctx) {
     incomesList(state, null),
     h('h2', { class: 'section-label' }, 'Despesas fixas'),
     expensesList(state, null),
+    h('h2', { class: 'section-label' }, 'Limite do dia'),
+    limitSettings(state),
     h('h2', { class: 'section-label' }, 'Resgates'),
     refillSettings(state),
+    h('h2', { class: 'section-label' }, 'Poupança'),
+    savingsSettings(ctx),
     h('h2', { class: 'section-label' }, 'Dados'),
     dataCard(),
     h('p', { class: 'caption center', style: 'padding-top:8px' }, `Hoje ${APP_VERSION}`));

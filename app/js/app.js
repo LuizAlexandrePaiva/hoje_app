@@ -2,6 +2,7 @@ import * as store from './data/store.js';
 import { todayISO } from './core/dates.js';
 import { computeDailyBudget, computeTomorrowBudget } from './core/budget.js';
 import { suggestRefill, suggestSurplus } from './core/refill.js';
+import { openSavings } from './core/savings.js';
 import { afterSheetClosed, toast, fitText } from './ui/dom.js';
 import * as sync from './data/sync.js';
 import { conflictSheet } from './ui/backup.js';
@@ -46,6 +47,7 @@ function buildContext(state) {
     ctx.tomorrow = computeTomorrowBudget(state, today);
     ctx.refill = suggestRefill(state, today, ctx.budget);
     ctx.surplus = suggestSurplus(state, today, ctx.budget);
+    ctx.savings = openSavings(state, today);
   }
   return ctx;
 }

@@ -61,6 +61,13 @@ export function addMonths(y, m, n) {
   return { y: Math.floor(idx / 12), m: (idx % 12) + 1 };
 }
 
+/** Mês 'AAAA-MM' deslocado n meses. */
+export function shiftMonth(mk, n) {
+  const [y, m] = mk.split('-').map(Number);
+  const r = addMonths(y, m, n);
+  return `${r.y}-${pad(r.m)}`;
+}
+
 export function isValidISO(s) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const { y, m, d } = parts(s);
@@ -98,6 +105,12 @@ export function formatHeader(s) {
 export function formatDayMonth(s, refYear) {
   const { y, m, d } = parts(s);
   return `${d} de ${MONTHS[m - 1].slice(0, 3)}${refYear && y !== refYear ? ` de ${y}` : ''}`;
+}
+
+/** "novembro de 2026" a partir de 'AAAA-MM' */
+export function formatMonth(mk) {
+  const [y, m] = mk.split('-').map(Number);
+  return `${MONTHS[m - 1]} de ${y}`;
 }
 
 /** "hoje", "amanhã", "em 3 dias", "há 2 dias" */

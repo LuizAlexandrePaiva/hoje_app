@@ -4,7 +4,7 @@ import { h, toast, sheet, fitText, amountParts } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
-import { computeDailyBudget, computeTomorrowBudget } from '../../core/budget.js';
+import { computeDailyBudget, computeTomorrowBudget, withDelta } from '../../core/budget.js';
 import { suggestRefill } from '../../core/refill.js';
 import { todayISO, addDays, formatDayMonth } from '../../core/dates.js';
 import { refillSheet } from './today.js';
@@ -37,11 +37,6 @@ function warnNegative(accountId) {
       refill.amount > 0 && h('button', { class: 'btn warn grow', onclick: () => refillSheet({ refill }) }, 'Resgatar')),
   ]), 350);
 }
-
-/** O estado se `cents` entrassem agora na conta (negativo: saíssem). */
-const withDelta = (state, accountId, cents) => ({
-  ...state, accounts: state.accounts.map((a) => (a.id === accountId ? { ...a, balance: a.balance + cents } : a)),
-});
 
 /** Limite do dia se uma receita de `cents` entrasse agora na conta. */
 function limitWithIncome(state, today, accountId, cents) {
@@ -97,12 +92,16 @@ export function renderSpend(ctx) {
         ? 'Entra no saldo agora e aumenta o limite do dia'
         : `Limite do dia passa para ${formatBRL(limitWithIncome(state, ctx.today, accountId, v))}`;
     } else {
-      const left = ctx.budget.remainingToday - v;
+      const b = ctx.budget;
+      const left = b.remainingToday - v; // do que está liberado agora
+      const full = b.dailyBudget - b.spentToday - v; // do limite, contando receitas a confirmar
+      const w = b.waiting;
       hint.textContent = v === 0
-        ? (ctx.budget.remainingToday >= 0 ? `Resta para gastar hoje: ${formatBRL(ctx.budget.remainingToday)}` : `Já passou ${formatBRL(-ctx.budget.remainingToday)} do limite de hoje`)
+        ? (b.remainingToday >= 0 ? `Resta para gastar hoje: ${formatBRL(b.remainingToday)}` : `Já passou ${formatBRL(-b.remainingToday)} do limite de hoje`)
         : left >= 0 ? `Sobram ${formatBRL(left)} hoje`
-          : `Passa ${formatBRL(-left)} do limite. Amanhã cai para ${formatBRL(tomorrowAfterSpend(state, ctx.today, accountId, v))}`;
-      hint.classList.toggle('neg', v > 0 && left < 0);
+          : full >= 0 ? `Passa ${formatBRL(-left)} do liberado até confirmar ${w.length === 1 ? w[0].name : 'as receitas pendentes'}`
+            : `Passa ${formatBRL(-full)} do limite. Amanhã cai para ${formatBRL(tomorrowAfterSpend(state, ctx.today, accountId, v))}`;
+      hint.classList.toggle('neg', v > 0 && full < 0);
     }
     if (display.isConnected) fitText(display.parentElement);
   }

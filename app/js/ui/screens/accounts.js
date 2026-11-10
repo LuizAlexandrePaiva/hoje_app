@@ -4,8 +4,9 @@ import { h, sheet, toast, amount } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL } from '../../core/money.js';
-import { formatLong, addDays, TIME_ZONE } from '../../core/dates.js';
-import { adjustSheet, transferSheet, addButton, editAccount, deleteAccount, listItem, transactionSheet, TX_LABEL } from '../editors.js';
+import { formatLong, addDays, relative, TIME_ZONE } from '../../core/dates.js';
+import { currentInvoices } from '../../core/schedule.js';
+import { adjustSheet, transferSheet, addButton, editAccount, deleteAccount, listItem, transactionSheet, invoiceSheet, TX_LABEL } from '../editors.js';
 
 const PAGE = 30;
 let historyLimit = PAGE; // cresce com "Ver mais" e volta ao abrir a aba de novo
@@ -154,12 +155,19 @@ function accountRow(ctx, a) {
   return listItem(a.name, sub, h('span', { class: a.balance < 0 ? 'neg' : '' }, formatBRL(a.balance)), () => accountSheet(ctx, a));
 }
 
+/** Cartão: a fatura que está por pagar, com o vencimento e o valor que o app prevê. */
+function cardRow(ctx, o) {
+  const due = `${o.date < ctx.today ? 'Venceu' : 'Vence'} ${relative(ctx.today, o.date)}`;
+  return listItem(o.name, h('span', { class: o.date <= ctx.today ? 'warn-text' : '' }, due), `−${formatBRL(o.amount)}`, () => invoiceSheet(o.key));
+}
+
 export function renderAccounts(ctx) {
   if (ctx.prevRoute !== '#/contas') historyLimit = PAGE;
   const spending = ctx.state.accounts.filter((a) => a.kind === 'spending');
   const goal = ctx.state.accounts.filter((a) => a.kind === 'goal');
   const total = spending.reduce((s, a) => s + a.balance, 0);
   const outside = goal.reduce((s, a) => s + a.balance, 0);
+  const cards = currentInvoices(ctx.state, ctx.today);
   return h('div', { class: 'screen accounts' },
     h('header', { class: 'screen-head' }, h('div', { class: 'titles' }, h('h1', {}, 'Contas'))),
     h('section', { class: 'hero' },
@@ -168,6 +176,8 @@ export function renderAccounts(ctx) {
       goal.length > 0 && h('p', { class: 'hero-note' }, `Fora do orçamento: ${formatBRL(outside)}`)),
     h('h2', { class: 'section-label' }, 'Contas de gasto'),
     h('section', { class: 'card flush' }, h('ul', { class: 'list' }, spending.map((a) => accountRow(ctx, a)))),
+    cards.length > 0 && h('h2', { class: 'section-label' }, 'Cartões'),
+    cards.length > 0 && h('section', { class: 'card flush' }, h('ul', { class: 'list' }, cards.map((o) => cardRow(ctx, o)))),
     goal.length > 0 && h('h2', { class: 'section-label' }, 'Fora do orçamento'),
     goal.length > 0 && h('section', { class: 'card flush' }, h('ul', { class: 'list' }, goal.map((a) => accountRow(ctx, a)))),
     h('section', { class: 'card flush' }, addButton('Nova conta', () => editAccount())),

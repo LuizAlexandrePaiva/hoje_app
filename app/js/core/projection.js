@@ -1,71 +1,51 @@
 // Saldo previsto das contas de gasto, dia a dia, para a linha do tempo.
 
 import { addDays, diffDays } from './dates.js';
-import { openEvents, flowInto } from './schedule.js';
-import { spendingAccountIds, computeDailyBudget, FALLBACK_HORIZON_DAYS } from './budget.js';
+import {
+  spendingAccountIds, plannedFlows, flowSeries, sustainableRate, lookDaysFor,
+  FALLBACK_HORIZON_DAYS, SCAN_DAYS,
+} from './budget.js';
 
 export const EXTRA_DAYS = 30;
-// Quanto além do fim do gráfico olhamos para achar o salário que fecha o último ciclo.
-const LOOKAHEAD_DAYS = 62;
 
 /**
- * Do dia de hoje até a véspera do próximo salário + 30 dias: o saldo ao fim de
- * cada dia, com as receitas, despesas e aportes previstos e gastando o limite
- * de cada dia.
- *
- * - Hoje conta só o que ainda resta; se o limite de hoje já estourou, os
- *   próximos dias seguem o limite de amanhã, que é menor.
- * - A cada salário o limite é refeito, como o app fará no dia: o mesmo cálculo
- *   do orçamento, com o saldo previsto e os eventos até a véspera do salário seguinte.
+ * De hoje até a véspera do próximo salário + 30 dias: o saldo ao fim de cada
+ * dia, com o que está previsto acontecendo na data (o que está vencido, hoje)
+ * e gastando o limite de cada dia. O limite de cada dia é refeito com o saldo
+ * previsto, pela mesma conta que o app fará no dia.
  *
  * `start` é o saldo de agora; `points[k].balance`, o do fim do dia k.
  */
-export function projectBalance(state, today, budget, tomorrow = computeDailyBudget(state, addDays(today, 1))) {
+export function projectBalance(state, today, budget) {
   const ids = spendingAccountIds(state);
   const end = addDays(budget.horizonEnd, EXTRA_DAYS);
-  const all = openEvents(state, today, addDays(end, LOOKAHEAD_DAYS));
+  const days = diffDays(today, end) + 1;
+  const total = days + SCAN_DAYS; // cada dia do gráfico enxerga tanto quanto o app enxergará nele
+  const all = plannedFlows(state, today, addDays(today, total - 1), ids);
+  const series = flowSeries(all, today, total);
   const byDay = new Map();
   for (const e of all) {
     if (!byDay.has(e.effectiveDate)) byDay.set(e.effectiveDate, []);
     byDay.get(e.effectiveDate).push(e);
   }
-  const flow = (day) => (byDay.get(day) || []).reduce((s, e) => s + flowInto(e, ids), 0);
-  // mesma regra do orçamento: o próximo salário ou, sem salário marcado, a próxima receita
-  const nextPayday = (after) => {
-    const incomes = all.filter((e) => e.kind === 'income' && e.date > after);
-    return (incomes.find((e) => e.isSalary) || incomes[0])?.date ?? null;
+  const paydays = all.filter((e) => e.kind === 'income');
+  const lastIncome = all.reduce((m, e) => (e.flow > 0 && e.date > m ? e.date : m), '');
+  const cycleEnd = (day) => {
+    const next = paydays.filter((e) => e.date > day);
+    const sal = next.find((e) => e.isSalary) || next[0];
+    return sal ? addDays(sal.date, -1) : addDays(day, FALLBACK_HORIZON_DAYS - 1);
   };
 
+  const cushion = budget.cushion || 0;
   const points = [];
   let balance = budget.spendableNow;
-  const push = (day, spend) => {
-    balance += flow(day) - spend;
-    const k = points.length;
-    // o limite é arredondado ao centavo; esse resto não é saldo negativo de verdade
-    const rounding = balance < 0 && balance > -(k + 1);
-    points.push({ date: day, balance: rounding ? 0 : balance, dayEvents: byDay.get(day) || [] });
-  };
-
-  // ciclo atual: até a véspera do próximo salário
-  const restToday = Math.max(budget.remainingToday, 0);
-  const daily = Math.max(budget.remainingToday >= 0 ? budget.dailyBudget : tomorrow.dailyBudget, 0);
-  for (let day = today; day <= budget.horizonEnd; day = addDays(day, 1)) push(day, day === today ? restToday : daily);
-
-  // ciclos seguintes: limite refeito no dia do salário
-  let cursor = addDays(budget.horizonEnd, 1);
-  while (cursor <= end) {
-    const payday = nextPayday(cursor);
-    const cycleEnd = payday ? addDays(payday, -1) : addDays(cursor, FALLBACK_HORIZON_DAYS - 1);
-    let cumulative = 0;
-    let best = Infinity;
-    for (let day = cursor, n = 1; day <= cycleEnd; day = addDays(day, 1), n++) {
-      cumulative += flow(day);
-      best = Math.min(best, (balance + cumulative) / n);
-    }
-    const limit = Math.max(Math.round(best), 0);
-    for (let day = cursor; day <= cycleEnd && day <= end; day = addDays(day, 1)) push(day, limit);
-    cursor = addDays(cycleEnd, 1);
+  for (let i = 0; i < days; i++) {
+    const day = addDays(today, i);
+    const limit = i === 0
+      ? Math.max(budget.dailyBudget - budget.spentToday, 0)
+      : Math.max(sustainableRate(balance - cushion, series, i, lookDaysFor(day, cycleEnd(day), lastIncome)).rate, 0);
+    balance += series.net[i] - limit;
+    points.push({ date: day, balance, limit, dayEvents: byDay.get(day) || [] });
   }
-
-  return { start: budget.spendableNow, points, events: all.filter((e) => e.effectiveDate <= end), end, days: diffDays(today, end) + 1 };
+  return { start: budget.spendableNow, points, events: all.filter((e) => e.effectiveDate <= end), end, days };
 }

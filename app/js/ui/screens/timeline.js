@@ -164,7 +164,7 @@ function eventList(ctx, proj) {
 }
 
 export function renderTimeline(ctx) {
-  const proj = projectBalance(ctx.state, ctx.today, ctx.budget, ctx.tomorrow);
+  const proj = projectBalance(ctx.state, ctx.today, ctx.budget);
   const c = chart(ctx, proj);
   return h('div', { class: 'screen timeline' },
     h('header', { class: 'screen-head' },
