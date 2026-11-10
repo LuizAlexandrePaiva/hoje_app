@@ -20,6 +20,7 @@ const PATHS = {
   arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/>',
   upload: '<path d="M12 15V4M7 9l5-5 5 5M5 20h14"/>',
 };
 

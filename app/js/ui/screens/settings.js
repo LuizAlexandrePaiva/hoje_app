@@ -3,8 +3,11 @@ import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import * as sync from '../../data/sync.js';
 import { todayISO } from '../../core/dates.js';
-import { incomesList, expensesList, field, inlineField, switchRow, errorBox, fail } from '../editors.js';
+import { incomesList, expensesList, field, inlineField, switchRow, moneyInput, errorBox, fail } from '../editors.js';
+import { parseBRL } from '../../core/money.js';
 import { APP_VERSION } from '../../version.js';
+import { formatBRL } from '../../core/money.js';
+import { savingFloor } from '../../core/savings.js';
 import { cloudSheet, statusText, statusTone } from '../backup.js';
 
 /**
@@ -23,8 +26,8 @@ export function refillSettings(state, { withAccounts = false } = {}) {
   const threshold = num(s.refill.thresholdDays);
   const target = num(s.refill.targetDays);
   const step = num(s.refill.step / 100);
-  const surplus = switchRow('Sugerir aplicar sobras', 'Quando a conta tiver bem mais que o necessário.', s.surplusEnabled !== false);
   const err = errorBox();
+  const surplus = switchRow('Sugerir aplicar sobras', 'Quando a conta tiver bem mais que o necessário.', s.surplusEnabled !== false);
 
   const save = () => {
     const t = Number(threshold.value);
@@ -43,7 +46,9 @@ export function refillSettings(state, { withAccounts = false } = {}) {
     store.updateSettings(patch);
     toast('Salvo');
   };
-  for (const el of [def, res, threshold, target, step, surplus.input]) el?.addEventListener('change', save);
+  for (const el of [def, res, surplus.input]) el?.addEventListener('change', save);
+  // campos de digitar: o toque que tirou o foco ainda está em curso, e redesenhar agora engoliria o clique
+  for (const el of [threshold, target, step]) el.addEventListener('change', () => setTimeout(save, 250));
 
   return h('section', { class: 'card' },
     withAccounts && field('Gastos do dia', def, 'Conta de onde saem os gastos lançados.'),
@@ -54,6 +59,37 @@ export function refillSettings(state, { withAccounts = false } = {}) {
       inlineField('Arredondar resgates para múltiplos de', step, null, { unit: 'R$', prefix: true })),
     err,
     surplus.el);
+}
+
+/** Margem de segurança: valor nas contas de gasto que o limite nunca usa. */
+function limitSettings(state) {
+  const input = moneyInput(state.settings.cushion || null, { placeholder: '0', maxlength: 12 });
+  const err = errorBox();
+  input.addEventListener('change', () => {
+    const v = input.value.trim() === '' ? 0 : parseBRL(input.value);
+    if (!Number.isInteger(v) || v < 0) return fail(err, 'Use só números, como 500 ou 1.200,00.', input);
+    fail(err, '');
+    if (v === (state.settings.cushion || 0)) return;
+    setTimeout(() => { store.updateSettings({ cushion: v }); toast('Salvo'); }, 250); // idem: não engole o toque em curso
+  });
+  return h('section', { class: 'card' },
+    field('Margem de segurança', input, 'O limite nunca usa esse valor. Fica nas contas de gasto para imprevistos.'),
+    err);
+}
+
+/** Regra de poupança: uma chave e uma linha que mostra os números que a regra está usando. */
+function savingsSettings(ctx) {
+  const on = ctx.state.settings.savingsEnabled !== false;
+  const sw = switchRow('Sugerir poupança', 'A cada receita, quanto dá para guardar. Nunca mais de 10%.', on);
+  sw.input.addEventListener('change', () => { store.updateSettings({ savingsEnabled: sw.input.checked }); toast('Salvo'); });
+  const limit = ctx.budget.dailyBudget;
+  const f = on ? savingFloor(ctx.state, ctx.today, limit) : null;
+  const status = !f ? null
+    : limit <= 0 ? 'Sem folga hoje. As sugestões voltam quando o limite ficar positivo.'
+      : f.basis === 'limit' ? 'Ainda sem 7 dias de gastos lançados. Por enquanto, guardar não baixa o limite em mais de 10%.'
+        : limit < f.floor ? `Mês apertado. O limite de hoje, ${formatBRL(limit)}, está abaixo de 90% do que você costuma gastar (${formatBRL(f.typical)} por dia).`
+          : `Você costuma gastar ${formatBRL(f.typical)} por dia. Depois de guardar, o limite não fica abaixo de ${formatBRL(f.floor)}.`;
+  return h('section', { class: 'card' }, sw.el, status && h('p', { class: 'caption' }, status));
 }
 
 export function exportBackup() {
@@ -118,13 +154,19 @@ function dataCard() {
 export function renderSettings(ctx) {
   const { state } = ctx;
   return h('div', { class: 'screen settings' },
-    h('header', { class: 'screen-head' }, h('h1', {}, 'Ajustes')),
+    h('header', { class: 'screen-head' },
+      h('button', { class: 'icon-btn', 'aria-label': 'Voltar para Hoje', onclick: () => ctx.navigate('#/hoje') }, icon('back', { size: 24 })),
+      h('div', { class: 'titles' }, h('h1', {}, 'Ajustes'))),
     h('h2', { class: 'section-label' }, 'Receitas'),
     incomesList(state, null),
     h('h2', { class: 'section-label' }, 'Despesas fixas'),
     expensesList(state, null),
+    h('h2', { class: 'section-label' }, 'Limite do dia'),
+    limitSettings(state),
     h('h2', { class: 'section-label' }, 'Resgates'),
     refillSettings(state),
+    h('h2', { class: 'section-label' }, 'Poupança'),
+    savingsSettings(ctx),
     h('h2', { class: 'section-label' }, 'Dados'),
     dataCard(),
     h('p', { class: 'caption center version' }, `Hoje ${APP_VERSION}`));

@@ -52,6 +52,13 @@ export function toInput(cents) {
   return (neg ? '-' : '') + s.replace(/,00$/, '');
 }
 
+const pct = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+
+/** Pontos-base em porcentagem, para baixo, com no máximo uma casa: 1000 → "10%", 741 → "7,4%". */
+export function formatPercent(bps) {
+  return `${pct.format(Math.floor(bps / 10) / 10)}%`;
+}
+
 export function ceilTo(cents, step) {
   return Math.ceil(cents / step) * step;
 }

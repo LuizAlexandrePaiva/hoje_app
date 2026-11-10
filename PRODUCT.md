@@ -12,29 +12,29 @@ Uma pessoa só: o próprio dono do app. É uma ferramenta pessoal, não um produ
 
 ## Product Purpose
 
-Calcular, a cada dia, quanto pode ser gasto hoje sem faltar dinheiro até a véspera do próximo salário, considerando o saldo real das contas de gasto, receitas e despesas previstas e aportes em metas. Sobras e excessos se redistribuem no dia seguinte.
+Calcular, a cada dia, quanto pode ser gasto hoje sem faltar dinheiro em nenhum dia dos próximos 12 meses, considerando o saldo real das contas de gasto, receitas e despesas previstas, faturas de cartão e aportes em metas. Sobras e excessos se redistribuem no dia seguinte, e a tela mostra quanto será o limite de amanhã.
 
 Sucesso é abrir o app, ver o número do dia, lançar um gasto em segundos e confiar que o valor está certo, sem precisar refazer contas em outro lugar.
 
 ## Positioning
 
-Uma pergunta, respondida com um cálculo que não conta com dinheiro que ainda não chegou: o limite é o menor valor de "disponível até o dia k ÷ dias até k" ao longo de todo o horizonte, então nenhum compromisso no meio do período fica descoberto. Junto disso, sugere quanto resgatar da reserva (ou aplicar do excedente) para a conta de gastos cobrir os próximos dias. Tudo offline, no aparelho, com backup que o servidor não consegue ler.
+Uma pergunta, respondida com um cálculo que não conta com dinheiro que ainda não chegou: o limite é o menor valor de "disponível até o dia k ÷ dias até k" ao longo de 12 meses, então nenhum compromisso fica descoberto, nem os que vêm depois do próximo salário; receita ainda não confirmada não libera gasto. Junto disso, sugere quanto resgatar da reserva (ou aplicar do excedente) para a conta de gastos cobrir os próximos dias, e quanto guardar de cada receita (até 10%). Tudo offline, no aparelho, com backup que o servidor não consegue ler.
 
 ## Operating Context
 
 - Uso diário no celular, com uma mão, como PWA instalado (Android e iPhone), em português e com valores em R$ e datas no fuso `America/Sao_Paulo`.
 - Rotinas: conferir o limite do dia, lançar gastos e receitas, confirmar receitas, contas e aportes quando acontecem, ajustar saldos para bater com o banco, fazer resgates de uma reserva de liquidez diária (por exemplo, um CDB).
 - Primeiro acesso passa por um assistente de configuração (contas, receitas, despesas, metas, parâmetros de resgate).
-- Telas atuais: Hoje, Linha do tempo, Contas, Metas, Ajustes, Configuração, Novo gasto.
+- Telas atuais: Hoje, Linha do tempo, Contas (com Cartões e faturas), Metas, Ajustes (aberto pelo topo de Hoje), Configuração, Lançar (gasto ou receita, pelo botão + da barra).
 
 ## Capabilities and Constraints
 
-- Limite diário dinâmico, lançamento rápido por teclado numérico, resgates planejados, receitas recorrentes (dia fixo ou Nº dia útil com feriados nacionais) e únicas, confirmação de ocorrências (antecipar, mudar data, marcar que não aconteceu), linha do tempo com saldo projetado em SVG próprio, contas e transferências, metas com aportes, exportação e importação em JSON.
+- Limite diário dinâmico, lançamento rápido por teclado numérico, resgates planejados, receitas recorrentes (dia fixo ou Nº dia útil com feriados nacionais) e únicas, confirmação de ocorrências (antecipar, mudar data, marcar que não aconteceu), linha do tempo com saldo projetado em SVG próprio, contas e transferências, fatura de cartão com gastos discriminados, poupança sugerida a cada receita, margem de segurança, metas com aportes, exportação e importação em JSON.
 - Stack existente: HTML, CSS e JavaScript puros, sem framework e sem etapa de build. Lógica de cálculo pura e testada em `app/js/core/`. Publicado como site estático no Netlify, com uma função `/api/sync`.
 - Funciona 100% offline (service worker cache-first). Nova versão exige subir `CACHE_VERSION` em `app/sw.js` e `APP_VERSION` em `app/js/version.js`.
 - Dinheiro em centavos inteiros; datas como `AAAA-MM-DD`.
 - Limitações conhecidas: só feriados nacionais; uma moeda e um usuário por backup; recorrências apenas mensais; Safari e app instalado no iPhone não compartilham dados sem o backup.
-- Terminologia do produto: "Hoje", "limite diário", "quanto resta", "resgate", "reserva", "excedente", "aporte", "meta", "Linha do tempo", "Ajustes", "código de recuperação".
+- Terminologia do produto: "Hoje", "limite diário", "quanto resta", "resgate", "reserva", "excedente", "aporte", "meta", "Linha do tempo", "Ajustes", "código de recuperação", "fatura", "margem de segurança", "poupança sugerida".
 
 ## Brand Commitments
 

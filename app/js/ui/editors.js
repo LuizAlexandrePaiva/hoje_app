@@ -1,12 +1,16 @@
 // Formulários (em folha modal) e listas editáveis de contas, receitas,
 // despesas fixas, metas e aportes. Usados no assistente inicial e em Ajustes.
 
-import { h, sheet, toast, confirmDialog, afterSheetClosed, joinList } from './dom.js';
+import { h, sheet, closeSheet, toast, confirmDialog, afterSheetClosed, joinList, amount as moneyText } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
-import { formatBRL, formatBRLShort, parseBRL, toInput } from '../core/money.js';
-import { todayISO, formatDayMonth, isValidISO, addDays, TIME_ZONE } from '../core/dates.js';
-import { MAX_MOVE_DAYS } from '../core/schedule.js';
+import { formatBRL, formatBRLShort, formatSigned, formatPercent, parseBRL, toInput } from '../core/money.js';
+import { todayISO, formatDayMonth, formatMonth, shiftMonth, monthKey, relative, isValidISO, addDays, TIME_ZONE } from '../core/dates.js';
+import { MAX_MOVE_DAYS, occurrenceByKey, currentInvoices } from '../core/schedule.js';
+import { invoiceKey, parseInvoiceKey } from '../core/invoice.js';
+import { computeDailyBudget, withDelta } from '../core/budget.js';
+import { suggestRefill } from '../core/refill.js';
+import { SAVINGS, openSavings, suggestSaving } from '../core/savings.js';
 
 // ---------- campos ----------
 
@@ -94,7 +98,6 @@ export function fail(box, msg, input) {
     box._input = null;
   }
   if (!box._home && box.parentNode) box._home = { parent: box.parentNode, next: box.nextSibling };
-  box.textContent = msg;
   if (input) {
     if (!box.id) box.id = `erro-${Math.random().toString(36).slice(2, 8)}`;
     const holder = input.closest('.field, .inline-field');
@@ -113,6 +116,7 @@ export function fail(box, msg, input) {
   } else if (box._home && box.parentNode !== box._home.parent) {
     box._home.parent.insertBefore(box, box._home.next);
   }
+  box.textContent = msg;
   return false;
 }
 
@@ -139,9 +143,9 @@ const KIND_HINT = {
   goal: 'Fica fora do orçamento (metas e investimentos).',
 };
 
-export function editAccount(account, { kind: presetKind, onSaved } = {}) {
+export function editAccount(account, { draft, kind: presetKind, onSaved } = {}) {
   const isNew = !account;
-  const a = account || { name: '', kind: presetKind || 'spending', balance: 0 };
+  const a = account || { name: '', kind: presetKind || 'spending', balance: 0, ...draft };
   const name = textInput(a.name, { placeholder: 'Ex.: Conta corrente' });
   const kindHint = h('span', { class: 'field-hint' }, KIND_HINT[a.kind]);
   const kind = segmented([['spending', 'De gasto'], ['goal', 'De meta']], a.kind, (v) => { kindHint.textContent = KIND_HINT[v]; });
@@ -156,7 +160,7 @@ export function editAccount(account, { kind: presetKind, onSaved } = {}) {
       item.balance = v;
     }
     const saved = store.upsert('accounts', item);
-    if (onSaved) afterSheetClosed(() => onSaved(saved || item)); else close();
+    if (onSaved) afterSheetClosed(() => onSaved(saved)); else close();
   },
   field('Nome', name),
   h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Tipo'), kind.el, kindHint),
@@ -238,7 +242,7 @@ export function editIncome(income, { draft, onSaved } = {}) {
   const n = numberInput(i.rule.type === 'businessDay' ? i.rule.n : 5, { maxlength: 2, 'aria-label': 'Qual dia útil' });
   const day = numberInput(i.rule.type === 'fixedDay' ? i.rule.day : 10, { maxlength: 2, 'aria-label': 'Dia do mês' });
   const sat = switchRow('Sábado conta como dia útil', 'Se cair no sábado, recebe na sexta.', i.rule.countSaturday);
-  const salary = switchRow('É o salário', 'O orçamento vai até a véspera dele.', i.isSalary);
+  const salary = switchRow('É o salário', 'A linha do tempo vai até um mês depois dele.', i.isSalary);
   const since = dateInput(i.since || todayISO());
   const exc = exceptionsEditor(i.exceptions);
   const nRow = inlineField('Qual dia útil', n, 'Desconta fins de semana e feriados.');
@@ -265,7 +269,7 @@ export function editIncome(income, { draft, onSaved } = {}) {
       const d = onceDate.value;
       const changed = isNew || i.rule.type !== 'once' || d !== i.rule.date;
       if (!isValidISO(d)) return fail(err, 'Escolha a data.', onceDate);
-      if (changed && d < today) return fail(err, 'Essa data já passou. Para uma receita que já caiu, use “+ Receita” na tela Hoje.', onceDate);
+      if (changed && d < today) return fail(err, 'Essa data já passou. Para uma receita que já caiu, use o botão + e escolha Receita.', onceDate);
       const saved = store.upsert('incomes', {
         ...i, name: name.value.trim(), amount: v, accountId: account.value,
         isSalary: false, rule: { type: 'once', date: d }, exceptions: {},
@@ -312,7 +316,15 @@ export function editExpense(expense) {
   const day = numberInput(e.day, { maxlength: 2, 'aria-label': 'Dia do vencimento' });
   const since = dateInput(e.since || todayISO());
   const exc = exceptionsEditor(e.exceptions);
+  const card = switchRow('É cartão de crédito', 'Dá para detalhar os gastos de cada fatura.', e.isCard);
+  const amountField = field('Valor', amount);
+  const syncCard = () => { amountField.querySelector('.field-label').textContent = card.input.checked ? 'Valor previsto' : 'Valor'; };
+  card.input.addEventListener('change', syncCard);
+  syncCard();
+  // fatura que está por pagar (só para cartão já salvo, fora da configuração inicial)
+  const current = !isNew && e.isCard && state.setupDone ? currentInvoices(state, todayISO()).find((o) => o.sourceId === e.id) : null;
   const moreOpts = more('Mais opções', exc.el, field('Contar a partir de', since, 'Já pagou a deste mês? Use uma data após o vencimento.'));
+  const hasInvoices = !isNew && Object.keys(state.invoices).some((k) => parseInvoiceKey(k)?.expenseId === e.id);
   const err = errorBox();
   sheet(isNew ? 'Nova despesa fixa' : 'Editar despesa fixa', (close) => form(() => {
     if (!name.value.trim()) return fail(err, 'Dê um nome à despesa.', name);
@@ -323,16 +335,23 @@ export function editExpense(expense) {
     if (!isValidISO(since.value)) { moreOpts.open = true; return fail(err, 'Escolha a data de início.', since); }
     let exceptions;
     try { exceptions = exc.read(); } catch (x) { return fail(err, x.message); }
-    store.upsert('expenses', { ...e, name: name.value.trim(), amount: v, accountId: account.value, day: d, exceptions, since: since.value });
+    const saved = store.upsert('expenses', { ...e, name: name.value.trim(), amount: v, accountId: account.value, day: d, exceptions, since: since.value, isCard: card.input.checked });
     close();
+    if (card.input.checked && !e.isCard && store.getState().setupDone) {
+      const first = currentInvoices(store.getState(), todayISO()).find((o) => o.sourceId === saved.id);
+      if (first) toast('A fatura fica em Contas', { label: 'Abrir', run: () => invoiceSheet(first.key) });
+    }
   },
   field('Nome', name),
-  h('div', { class: 'field-row' }, field('Valor', amount), field('Sai de', account)),
+  h('div', { class: 'field-row' }, amountField, field('Sai de', account)),
   inlineField('Dia do vencimento', day),
+  card.el,
+  current && h('button', { type: 'button', class: 'btn block', onclick: () => invoiceSheet(current.key) }, 'Abrir fatura'),
   moreOpts,
   err,
   actions(!isNew && (async () => {
-    if (await confirmDialog('Excluir despesa?', `“${e.name}” deixa de ser prevista.`, 'Excluir', true)) store.remove('expenses', e.id);
+    const msg = hasInvoices ? `“${e.name}” deixa de ser prevista e as faturas dela são apagadas.` : `“${e.name}” deixa de ser prevista.`;
+    if (await confirmDialog('Excluir despesa?', msg, 'Excluir', true)) store.remove('expenses', e.id);
   }))));
 }
 
@@ -454,13 +473,14 @@ const yearOf = (d) => Number(d.slice(0, 4));
 
 /** Detalhes de um evento previsto: confirmar agora ou mudar a data. */
 export function eventSheet(event) {
+  if (event.isCard) return invoiceSheet(event.key); // cartão: a fatura mostra tudo isso e os gastos
   const cfg = CONFIRM[event.kind];
   const ref = yearOf(todayISO());
   const moved = event.originalDate && event.date !== event.originalDate;
   sheet(event.name, () => [
     h('div', { class: 'stat' },
-      h('span', { class: 'stat-label' }, `Previsto para ${formatDayMonth(event.date, ref)}${moved ? `, antes ${formatDayMonth(event.originalDate, ref)}` : ''}`),
-      h('span', { class: `stat-value lg ${event.kind === 'income' ? 'pos' : ''}`, 'data-fit': true }, formatBRL(event.amount))),
+      h('span', { class: 'stat-label' }, `Previsto para ${formatDayMonth(event.date, ref)}${moved ? `, era ${formatDayMonth(event.originalDate, ref)}` : ''}`),
+      moneyText(formatBRL(event.amount), `lg ${event.kind === 'income' ? 'pos' : ''}`, { 'data-fit': true })),
     h('button', { class: 'btn primary block', onclick: () => confirmOccurrenceSheet(event) }, cfg.early),
     h('button', { class: 'btn block', onclick: () => moveSheet(event) }, 'Mudar a data'),
   ]);
@@ -508,9 +528,10 @@ export function confirmOccurrenceSheet(event) {
     const v = parseBRL(amount.value);
     if (Number.isNaN(v) || v < 0) return fail(err, 'Use só números, como 2.500,00.', amount);
     if (!isValidISO(date.value) || date.value > today) return fail(err, 'Escolha hoje ou uma data passada. Se ainda vai acontecer, use “Vai ser em outro dia”.', date);
-    store.confirmOccurrence(event, { amount: v, date: date.value });
+    const t = store.confirmOccurrence(event, { amount: v, date: date.value });
     close();
-    toast(`${event.name}: ${formatBRL(v)} registrado`);
+    const tip = event.kind === 'income' ? savingTip(t) : {};
+    toast(`${event.name}: ${formatBRL(v)} registrado${tip.note || ''}`, tip.action);
   },
   h('p', { class: 'sheet-lead' }, `Previsto para ${formatDayMonth(event.date, ref)}. ${cfg.where} ${acc?.name ?? 'conta excluída'}.`),
   h('div', { class: 'field-row' }, field('Valor', amount), field('Data', date)),
@@ -528,6 +549,102 @@ export function confirmOccurrenceSheet(event) {
   h('button', { type: 'button', class: 'btn quiet block', onclick: () => moveSheet(event) }, 'Vai ser em outro dia')));
 }
 
+// ---------- poupança: guardar parte de uma receita ----------
+
+/** Depois de confirmar uma receita: ação "Guardar R$ X" no aviso, ou a frase de mês apertado. */
+function savingTip(tx) {
+  const state = store.getState();
+  if (state.settings.savingsEnabled === false) return {};
+  const today = todayISO();
+  const s = openSavings(state, today).find((o) => o.tx.id === tx.id);
+  // com aviso de resgate na tela, a poupança espera: um pedido por vez
+  if (s && suggestRefill(state, today, computeDailyBudget(state, today)).show) return {};
+  if (s) return { action: { label: `Guardar ${formatBRLShort(s.amount)}`, run: () => savingSheet(tx.id) } };
+  const why = suggestSaving(state, today, tx).reason;
+  return why === 'tight' || why === 'no-room' ? { note: '. Mês apertado, nada a guardar desta vez.' } : {};
+}
+
+/** Folha da sugestão: valor editável (até 10%), para onde vai e a conta por trás do número. */
+export function savingSheet(txId) {
+  const state = store.getState();
+  const today = todayISO();
+  const s = openSavings(state, today).find((o) => o.tx.id === txId);
+  if (!s) return toast('Esta sugestão não está mais disponível.');
+  const { tx } = s;
+  const name = tx.desc || 'Receita';
+  const from = store.getAccount(tx.to);
+  const goals = accountOptions(state, 'goal');
+  const toSel = goals.length > 1 ? select(goals, s.to) : null;
+  const value = moneyInput(s.amount, { 'data-noautofocus': '1' });
+  const hint = h('span', { class: 'field-hint' });
+  const submit = h('button', { type: 'submit', class: 'btn primary' });
+  const err = errorBox();
+  const read = () => parseBRL(value.value);
+  // o limite real de agora: s.limit de uma linha posterior já conta com as anteriores guardadas
+  const now = computeDailyBudget(state, today).dailyBudget;
+  const sync = () => {
+    const v = read();
+    const ok = v > 0;
+    const after = ok ? computeDailyBudget(withDelta(state, tx.to, -v), today).dailyBudget : now;
+    const below = ok && after < s.floor;
+    hint.classList.toggle('neg', below);
+    hint.textContent = below
+      ? `Limite do dia cai para ${formatBRL(after)}, abaixo do mínimo da regra (${formatBRL(s.floor)}).`
+      : `Limite do dia: de ${formatBRL(now)} para ${formatBRL(after)}.${s.typical != null && after < s.typical ? ` Você costuma gastar ${formatBRL(s.typical)}.` : ''}`;
+    if (goals.length) submit.textContent = ok ? `Guardar ${formatBRLShort(v)}` : 'Guardar';
+  };
+  value.addEventListener('input', sync);
+  const lead = s.limitedBy === 'cap' ? `Dá para guardar ${formatPercent(SAVINGS.capBps)}, o teto da regra.`
+    : s.limitedBy === 'floor' ? `Dá para guardar ${formatPercent(s.bps)} sem apertar seus dias.`
+      : `Dá para guardar o que há em ${from.name}.`;
+  const row = (k, v, cls = '') => [h('span', { class: `k ${cls}` }, k), h('span', { class: `v ${cls}` }, v)];
+  const days = Math.min(s.days || 0, SAVINGS.windowDays);
+  const createAccount = () => editAccount(null, { draft: { name: 'Poupança', kind: 'goal' }, onSaved: () => savingSheet(txId) });
+  if (!goals.length) submit.textContent = 'Criar conta de meta';
+  sync();
+  sheet('Guardar parte?', (close) => form(() => {
+    if (!goals.length) return createAccount();
+    const v = read();
+    if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.', value);
+    if (v > s.cap) return fail(err, `No máximo ${formatBRL(s.cap)}, ${formatPercent(SAVINGS.capBps)} do que entrou.`, value);
+    if (v > from.balance) return fail(err, `${from.name} tem só ${formatBRL(from.balance)}.`, value);
+    const to = store.getAccount(toSel ? toSel.value : s.to);
+    const t = to && store.saveFromIncome(tx.id, v, to.id);
+    if (!t) { close(); return toast('Esta sugestão não está mais disponível.'); }
+    close();
+    toast(`${formatBRL(v)} guardados em ${to.name}`, { label: 'Desfazer', run: () => { store.deleteTransaction(t.id); toast('Poupança desfeita'); } });
+  },
+  h('p', { class: 'sheet-lead' }, `${name}: entraram ${formatBRL(tx.amount)}. ${lead}`),
+  h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Valor'), h('span', { class: 'money' }, value), hint),
+  !goals.length && h('p', { class: 'field-hint' }, 'Falta uma conta de meta para receber o valor. Ela fica fora do limite do dia.'),
+  toSel && field('Para', toSel, `Sai de ${from.name}. Faça a transferência no banco e registre aqui.`),
+  goals.length === 1 && h('p', { class: 'field-hint' }, `Sai de ${from.name} e vai para ${goals[0][1]}, fora do limite do dia. Faça a transferência no banco e registre aqui.`),
+  more('De onde vem o valor',
+    h('div', { class: 'calc' },
+      row('Entrou', formatBRL(tx.amount)),
+      row(`Teto de ${formatPercent(SAVINGS.capBps)}`, formatBRL(s.cap)),
+      s.limitedBy === 'balance' && row(`Saldo de ${from.name}`, formatBRL(from.balance)),
+      row('Limite do dia hoje', formatBRL(now)),
+      s.typical != null && row('Você costuma gastar por dia', formatBRL(s.typical)),
+      row('Mínimo depois de guardar', formatBRL(s.floor)),
+      h('span', { class: 'rule' }),
+      row('Sugestão', formatBRL(s.amount), 'total')),
+    h('p', { class: 'field-hint' }, s.basis === 'history'
+      ? `O mínimo é 90% do que você gastou por dia nos últimos ${days} dias. A sugestão é o maior valor, em reais inteiros, que respeita o teto e o mínimo.`
+      : 'Ainda sem 7 dias de gastos lançados. Por enquanto, o mínimo é 90% do limite antes de guardar.')),
+  err,
+  h('div', { class: 'form-actions' },
+    h('button', {
+      type: 'button', class: 'btn',
+      onclick: () => {
+        store.skipSaving(tx.id);
+        close();
+        toast('Sugestão dispensada', { label: 'Desfazer', run: () => store.skipSaving(tx.id, false) });
+      },
+    }, 'Desta vez não'),
+    submit)));
+}
+
 // ---------- listas editáveis ----------
 
 export function addButton(label, onclick) {
@@ -536,7 +653,7 @@ export function addButton(label, onclick) {
 
 function listCard(title, items, emptyText, onAdd, addLabel) {
   return h('section', { class: 'card flush' },
-    title && h('div', { class: 'card-head' }, h('h2', { class: 'card-title' }, title)),
+    title && h('div', { class: 'card-head list-head' }, h('h2', { class: 'card-title' }, title)),
     items.length ? h('ul', { class: 'list' }, items) : h('p', { class: 'empty' }, emptyText),
     addButton(addLabel, onAdd));
 }
@@ -569,13 +686,13 @@ export function incomesList(state, title = 'Receitas') {
   const visible = state.incomes.filter((i) => !(i.rule?.type === 'once' && state.settled[`income:${i.id}:unica`]));
   return listCard(title,
     visible.map((i) => listItem(i.name, withAccount(state, describeRule(i.rule), i.accountId),
-      formatBRLShort(i.amount), () => editIncome(i), i.isSalary && h('span', { class: 'badge pos' }, 'Salário'))),
+      formatBRLShort(i.amount), () => editIncome(i), i.isSalary && h('span', { class: 'badge' }, 'Salário'))),
     'Nenhuma receita ainda.', () => editIncome(), 'Nova receita');
 }
 
 export function expensesList(state, title = 'Despesas fixas') {
   return listCard(title,
-    state.expenses.map((e) => listItem(e.name, withAccount(state, `Dia ${e.day}`, e.accountId), formatBRLShort(e.amount), () => editExpense(e))),
+    state.expenses.map((e) => listItem(e.name, withAccount(state, `Dia ${e.day}`, e.accountId), formatBRLShort(e.amount), () => editExpense(e), e.isCard && h('span', { class: 'badge' }, 'Cartão'))),
     'Nenhuma despesa fixa.', () => editExpense(), 'Nova despesa');
 }
 
@@ -628,6 +745,7 @@ export function transactionSheet(t) {
   const isMove = t.type === 'transfer' || t.type === 'contribution';
   const where = isMove ? `de ${acc(t.from)} para ${acc(t.to)}` : t.from ? `de ${acc(t.from)}` : `em ${acc(t.to)}`;
   const when = `${formatDayMonth(t.date, yearOf(todayISO()))}${t.createdAt && (isSpend || t.type === 'income') ? `, ${txTime.format(new Date(t.createdAt))}` : ''}`;
+  const savedOf = t.type === 'income' ? store.getState().transactions.filter((x) => x.savingOf === t.id).reduce((sum, x) => sum + x.amount, 0) : 0;
   sheet(t.desc || label, (close) => form(() => {
     const next = name.value.trim();
     if (next !== (t.desc || '')) {
@@ -638,15 +756,201 @@ export function transactionSheet(t) {
   },
   h('div', { class: 'stat' },
     h('span', { class: 'stat-label' }, `${when}, ${where}`),
-    h('span', { class: 'stat-value lg', 'data-fit': true }, formatBRL(Math.abs(t.amount)))),
+    moneyText(formatBRL(Math.abs(t.amount)), `lg ${t.type === 'income' ? 'pos' : ''}`, { 'data-fit': true })),
   field('Nome', name),
   suggest && nameList(listId, t.type),
+  savedOf > 0 && h('p', { class: 'field-hint' }, `Poupança desta receita: ${formatBRL(savedOf)}.`),
   actions(async () => {
     const title = isSpend ? 'Excluir gasto?' : 'Excluir movimentação?';
-    const msg = isSpend ? 'O valor volta para o saldo da conta.' : 'Os saldos voltam ao que eram antes dela.';
+    const msg = isSpend ? 'O valor volta para o saldo da conta.'
+      : `Os saldos voltam ao que eram antes dela.${savedOf > 0 ? ` A poupança de ${formatBRL(savedOf)} continua registrada.` : ''}`;
     if (await confirmDialog(title, msg, 'Excluir', true)) {
       store.deleteTransaction(t.id);
       toast(isSpend ? 'Gasto excluído' : 'Movimentação excluída');
     }
   })));
+}
+
+// ---------- fatura de cartão ----------
+
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+/** Até quantos meses à frente dá para abrir uma fatura. */
+const INVOICE_MONTHS_AHEAD = 12;
+
+/** A fatura mudou por baixo (outro aparelho, despesa excluída): fecha e avisa. */
+function invoiceGone(e) {
+  closeSheet();
+  toast(e.message);
+}
+
+/** Fatura de um cartão em um mês: valor previsto, estado, gastos e pagamento. */
+export function invoiceSheet(key, { scroll, focus } = {}) {
+  const state = store.getState();
+  const today = todayISO();
+  const ref = yearOf(today);
+  const p = parseInvoiceKey(key);
+  const occ = occurrenceByKey(state, key);
+  if (!p || !occ?.isCard) return closeSheet();
+  const exp = state.expenses.find((e) => e.id === p.expenseId);
+  const paid = state.settled[key] || null;
+  const inv = occ.invoice;
+  const items = state.invoices[key]?.items || [];
+
+  // meses vizinhos: só os que têm ocorrência, até 12 meses à frente
+  const floor = monthKey(exp.since || state.createdAt || today);
+  const ceil = shiftMonth(monthKey(today), INVOICE_MONTHS_AHEAD);
+  const neighbor = (n) => {
+    const mk = shiftMonth(p.month, n);
+    const k = invoiceKey(p.expenseId, mk);
+    return mk >= floor && mk <= ceil && occurrenceByKey(state, k) ? k : null;
+  };
+  const prev = neighbor(-1);
+  const next = neighbor(1);
+
+  let badge = ['', inv.closed ? 'Fechada' : 'Aberta'];
+  let line;
+  let tone = '';
+  let value = occ.amount;
+  let note = null;
+  if (paid?.skipped) {
+    badge = ['', 'Pulada'];
+    line = 'Não foi paga neste mês';
+    value = 0;
+    note = 'Nada saiu do saldo.';
+  } else if (paid) {
+    badge = ['pos', 'Paga'];
+    line = `Paga em ${formatDayMonth(paid.date, ref)}`;
+    value = paid.amount;
+    note = inv.count && inv.sum !== paid.amount ? `Os gastos somam ${formatBRL(inv.sum)}.` : null;
+  } else {
+    const due = formatDayMonth(occ.date, ref);
+    const movedDate = occ.date !== occ.originalDate;
+    line = occ.date < today ? `Venceu ${due}, ${relative(today, occ.date)}`
+      : occ.date === today ? `Vence hoje, ${due}`
+        : `Vence ${due}, ${movedDate ? `era ${formatDayMonth(occ.originalDate, ref)}` : relative(today, occ.date)}`;
+    tone = occ.date <= today ? 'warn-text' : '';
+    const diff = inv.total - inv.estimate;
+    note = inv.count && diff ? `${formatBRL(Math.abs(diff))} ${diff > 0 ? 'acima' : 'abaixo'} do previsto.` : null;
+  }
+
+  // ocorrência lida na hora do toque: o valor pode ter mudado desde que a folha abriu
+  const fresh = () => occurrenceByKey(store.getState(), key);
+  const canMove = addDays(occ.originalDate, MAX_MOVE_DAYS) >= today;
+  const closed = switchRow('Fatura fechada', 'Vale a soma dos gastos, não o previsto.', inv.closed);
+  closed.input.addEventListener('change', () => {
+    try { store.setInvoiceClosed(key, closed.input.checked); } catch (e) { return invoiceGone(e); }
+    invoiceSheet(key, { scroll: document.querySelector('.sheet')?.scrollTop, focus: '.switch input' });
+  });
+
+  const row = (it) => h('li', {}, h('button', { class: 'list-item', onclick: () => invoiceItemSheet(key, it) },
+    h('span', { class: 'li-main' }, h('span', { class: `li-title ${it.name ? '' : 'muted'}` }, it.name || 'Gasto')),
+    h('span', { class: 'li-end' }, h('span', { class: 'li-value' }, formatBRL(it.amount)), icon('chevron', { size: 18, cls: 'chev' }))));
+  const rest = !paid && inv.rest > 0 && h('li', {}, h('div', { class: 'row-item' },
+    h('span', { class: 'li-main' }, h('span', { class: 'li-title muted' }, 'Resto do previsto')),
+    h('span', { class: 'li-value muted' }, formatBRL(inv.rest))));
+  const empty = paid ? 'Nenhum gasto detalhado nesta fatura.'
+    : `O app conta com o previsto de ${formatBRLShort(inv.estimate)}. Gastos lançados aqui não saem do saldo: só o pagamento da fatura sai.`;
+
+  sheet(occ.name, () => [
+    h('div', { class: 'month-nav' },
+      prev ? h('button', { class: 'icon-btn', 'aria-label': 'Mês anterior', onclick: () => invoiceSheet(prev, { focus: '[aria-label="Mês anterior"]' }) }, icon('back')) : h('span'),
+      h('span', { class: 'li-title center', tabindex: -1 }, cap(formatMonth(p.month))),
+      next ? h('button', { class: 'icon-btn', 'aria-label': 'Próximo mês', onclick: () => invoiceSheet(next, { focus: '[aria-label="Próximo mês"]' }) }, icon('chevron')) : h('span')),
+    h('div', { class: 'stat' },
+      h('div', { class: 'row between gap' },
+        h('span', { class: 'stat-label' }, h('span', { class: tone }, line)),
+        h('span', { class: `badge ${badge[0]}` }, badge[1])),
+      moneyText(formatBRL(value), 'lg', { 'data-fit': true }),
+      note && h('span', { class: 'field-hint' }, note)),
+    h('div', { class: 'field' },
+      h('span', { class: 'field-label' }, 'Gastos da fatura'),
+      h('div', { class: 'card inset invoice-items' },
+        items.length ? h('ul', { class: 'list' }, items.map(row), rest) : h('p', { class: 'empty' }, empty),
+        h('button', { type: 'button', class: 'btn-add', 'data-add': '1', onclick: () => invoiceItemSheet(key) }, icon('plus', { size: 18 }), 'Adicionar gasto'))),
+    !paid && items.length > 0 && closed.el,
+    !paid && h('div', { class: 'form-actions' },
+      canMove && h('button', { class: 'btn', onclick: () => { const o = fresh(); if (o) moveSheet(o); else closeSheet(); } }, 'Mudar a data'),
+      h('button', { class: 'btn primary', onclick: () => { const o = fresh(); if (o) confirmOccurrenceSheet(o); else closeSheet(); } }, 'Já paguei')),
+    paid && !paid.skipped && h('p', { class: 'field-hint' }, 'Para desfazer o pagamento, exclua a movimentação em Contas.'),
+  ]);
+  const panel = document.querySelector('.sheet');
+  if (scroll === 'add') panel.querySelector('[data-add]')?.scrollIntoView({ block: 'center' });
+  else if (scroll != null) panel.scrollTop = scroll;
+  // a folha é refeita a cada troca: devolve o foco ao controle usado (ou ao mês, se ele sumiu)
+  if (focus) (panel.querySelector(focus) || panel.querySelector('.month-nav .li-title'))?.focus({ preventScroll: true });
+}
+
+/** Um gasto da fatura: nome e valor. Em gasto novo dá para salvar e já lançar o próximo. */
+function invoiceItemSheet(key, item) {
+  const state = store.getState();
+  const p = parseInvoiceKey(key);
+  const exp = state.expenses.find((e) => e.id === p.expenseId);
+  const isNew = !item;
+  let added = 0;
+  const listId = 'nomes-fatura';
+  const value = moneyInput(item?.amount ?? null);
+  const name = textInput(item?.name, {
+    placeholder: 'Ex.: Mercado, Assinatura', maxlength: store.NAME_MAX, list: listId, enterkeyhint: 'next',
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); value.focus(); } },
+  });
+  const lead = h('p', { class: 'sheet-lead', 'aria-live': 'polite' }, `${exp?.name ?? 'Cartão'}, ${formatMonth(p.month)}.`);
+  const err = errorBox();
+  const back = (scroll) => invoiceSheet(key, { scroll });
+  /** Salva o que está no formulário; devolve o gasto, false (valor inválido) ou null (fatura sumiu). */
+  const save = () => {
+    const v = parseBRL(value.value);
+    if (!Number.isSafeInteger(v) || v <= 0) return fail(err, 'Informe o valor.', value);
+    try {
+      const input = { name: name.value, amount: v };
+      const saved = isNew ? store.addInvoiceItem(key, input) : store.updateInvoiceItem(key, item.id, input);
+      if (!saved) throw new Error('Este gasto não existe mais.');
+      return saved;
+    } catch (e) { invoiceGone(e); return null; }
+  };
+  const isEmpty = () => !name.value.trim() && !value.value.trim();
+  const again = () => {
+    if (added && isEmpty()) return name.focus(); // toque repetido: nada a salvar
+    const saved = save();
+    if (!saved) return;
+    added++;
+    const sum = occurrenceByKey(store.getState(), key)?.invoice.sum ?? 0;
+    lead.textContent = `${saved.name ? `${saved.name}: gasto lançado` : 'Gasto lançado'}. Os gastos somam ${formatBRL(sum)}.`;
+    err.textContent = '';
+    name.value = '';
+    value.value = '';
+    name.focus();
+  };
+  sheet(isNew ? 'Novo gasto' : 'Editar gasto', () => form(() => {
+    // depois de "Salvar e novo", salvar com o formulário vazio só volta para a fatura
+    if (added && isEmpty()) return back('add');
+    if (save()) back(isNew ? 'add' : undefined);
+  },
+  lead,
+  field('Nome', name),
+  field('Valor', value),
+  h('datalist', { id: listId }, store.invoiceNames(p.expenseId).map((n) => h('option', { value: n }))),
+  err,
+  h('div', { class: 'form-actions' },
+    isNew
+      ? h('button', { type: 'button', class: 'btn', onclick: again }, 'Salvar e novo')
+      : h('button', {
+        type: 'button', class: 'btn danger-text',
+        onclick: () => {
+          let gone;
+          try { gone = store.removeInvoiceItem(key, item.id); } catch (e) { return invoiceGone(e); }
+          back();
+          if (!gone) return;
+          toast('Gasto removido', {
+            label: 'Desfazer',
+            run: () => {
+              try {
+                store.addInvoiceItem(key, gone.item, gone.index);
+                if (gone.closed) store.setInvoiceClosed(key, true);
+              } catch (e) { return invoiceGone(e); }
+              back();
+            },
+          });
+        },
+      }, icon('trash', { size: 20 }), 'Excluir'),
+    h('button', { type: 'submit', class: 'btn primary' }, 'Salvar'))));
 }

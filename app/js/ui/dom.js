@@ -32,6 +32,21 @@ export function svg(tag, attrs = {}, ...children) {
   return el;
 }
 
+// ---------- valor em destaque ----------
+
+/**
+ * Valor em dinheiro com a parte inteira em evidência: "R$" e centavos menores.
+ * Recebe o texto já formatado ("R$ 124,93"); o textContent continua igual.
+ */
+export function amountParts(text) {
+  const m = /^(.*?R\$\s?)(.*?)(,\d{2})?$/.exec(text);
+  return m ? [h('span', { class: 'cur' }, m[1]), m[2], m[3] && h('span', { class: 'dec' }, m[3])].filter(Boolean) : [text];
+}
+
+export function amount(text, cls = '', attrs = {}) {
+  return h('span', { class: `amount ${cls}`.trim(), ...attrs }, amountParts(text));
+}
+
 // ---------- texto que precisa caber ----------
 
 const FIT_MIN_PX = 12;
@@ -123,6 +138,7 @@ export function sheet(title, build, { onClose } = {}) {
   fitText(panel);
   requestAnimationFrame(() => {
     backdrop.classList.add('open');
+    if (panel.contains(document.activeElement)) return; // quem abriu já escolheu o foco
     const first = panel.querySelector('input:not([type=checkbox]):not([type=radio]), select');
     if (first && !first.dataset.noautofocus) first.focus({ preventScroll: true });
     else panel.focus({ preventScroll: true });

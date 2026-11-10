@@ -1,158 +1,146 @@
-// Linha do tempo: gráfico SVG próprio do saldo projetado + lista de eventos.
+// Linha do tempo: uma linha com o saldo previsto e a lista do que está por vir.
 
-import { h, svg } from '../dom.js';
+import { h, svg, amountParts } from '../dom.js';
+import { icon } from '../icons.js';
 import { formatBRL, formatSigned } from '../../core/money.js';
 import { formatShort, formatLong, formatDayMonth, relative, addDays } from '../../core/dates.js';
 import { projectBalance } from '../../core/projection.js';
+import { spendingAccountIds } from '../../core/budget.js';
+import { flowInto } from '../../core/schedule.js';
 import * as store from '../../data/store.js';
 import { eventSheet, editIncome, addButton } from '../editors.js';
 
 const W = 360;
-const H = 188;
-// r: calha do rótulo "R$ 0" · b: datas do eixo
-const PAD = { l: 6, r: 34, t: 10, b: 26 };
+const H = 176;
+const PAD = { l: 8, r: 8, t: 14, b: 24 };
 
-const pct = (v, total) => `${((v / total) * 100).toFixed(2)}%`;
-
-// curva suave que passa por todos os pontos sem ultrapassá-los (monotônica, como a
-// curveMonotoneX do d3): não cria picos nem vales que não existem nos dados
-function smoothPath(xs, ys) {
-  const n = xs.length;
-  const f = (v) => v.toFixed(1);
-  if (n < 3) return xs.map((x, i) => `${i ? 'L' : 'M'}${f(x)},${f(ys[i])}`).join('');
-  const d = []; // inclinação de cada trecho
-  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
-  const m = [d[0]];
-  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (2 * d[i - 1] * d[i]) / (d[i - 1] + d[i]));
-  m.push(d[n - 2]);
-  let out = `M${f(xs[0])},${f(ys[0])}`;
-  for (let i = 0; i < n - 1; i++) {
-    const dx = (xs[i + 1] - xs[i]) / 3;
-    out += `C${f(xs[i] + dx)},${f(ys[i] + m[i] * dx)} ${f(xs[i + 1] - dx)},${f(ys[i + 1] - m[i + 1] * dx)} ${f(xs[i + 1])},${f(ys[i + 1])}`;
+/** Curva suave que nunca passa dos pontos (interpolação cúbica monótona). */
+function smoothPath(p) {
+  const n = p.length;
+  if (n < 3) return p.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join('');
+  const slope = (i) => {
+    const h0 = p[i][0] - p[i - 1][0];
+    const h1 = p[i + 1][0] - p[i][0];
+    const s0 = (p[i][1] - p[i - 1][1]) / h0;
+    const s1 = (p[i + 1][1] - p[i][1]) / h1;
+    const mid = (s0 * h1 + s1 * h0) / (h0 + h1);
+    return (Math.sign(s0) + Math.sign(s1)) * Math.min(Math.abs(s0), Math.abs(s1), 0.5 * Math.abs(mid)) || 0;
+  };
+  const t = new Array(n);
+  for (let i = 1; i < n - 1; i++) t[i] = slope(i);
+  const edge = (a, b, tb) => (3 * (p[b][1] - p[a][1]) / (p[b][0] - p[a][0]) - tb) / 2;
+  t[0] = edge(0, 1, t[1]);
+  t[n - 1] = edge(n - 2, n - 1, t[n - 2]);
+  let d = `M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;
+  for (let i = 1; i < n; i++) {
+    const dx = (p[i][0] - p[i - 1][0]) / 3;
+    d += `C${(p[i - 1][0] + dx).toFixed(1)},${(p[i - 1][1] + dx * t[i - 1]).toFixed(1)} ${(p[i][0] - dx).toFixed(1)},${(p[i][1] - dx * t[i]).toFixed(1)} ${p[i][0].toFixed(1)},${p[i][1].toFixed(1)}`;
   }
-  return out;
+  return d;
 }
 
-// rótulos em HTML por cima do SVG: ficam em 12 px de verdade, seja qual for a largura da tela
-function label(cls, text, { x, y } = {}) {
-  const vars = [x != null && `--x:${pct(x, W)}`, y != null && `--y:${pct(y, H)}`].filter(Boolean).join(';');
-  return h('span', { class: `chart-label ${cls}`, style: vars || null, 'aria-hidden': 'true' }, text);
-}
+const short = (s, max = 16) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 
 function chart(ctx, proj) {
-  const pts = proj.points;
-  const values = pts.map((p) => p.spending);
-  let min = Math.min(0, ...values);
-  let max = Math.max(...values);
-  const padY = (max - min) * 0.08 || 1000;
-  min -= min < 0 ? padY : padY * 0.4; // folga abaixo do zero para o ponto não encostar nas datas
-  max += padY;
+  const ids = spendingAccountIds(ctx.state);
+  // o primeiro ponto é o saldo de agora; os demais, o saldo ao fim de cada dia
+  const pts = [{ date: ctx.today, value: proj.start, now: true, events: [] },
+    ...proj.points.map((p) => ({ date: p.date, value: p.balance, events: p.dayEvents }))];
+  const values = pts.map((p) => p.value);
+  let lo = Math.min(0, ...values);
+  let hi = Math.max(...values, lo + 100);
+  const span = hi - lo;
+  hi += span * 0.06;
+  if (lo < 0) lo -= span * 0.06;
   const iw = W - PAD.l - PAD.r;
   const ih = H - PAD.t - PAD.b;
-  const bottom = PAD.t + ih;
-  const x = (i) => PAD.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
-  const y = (v) => PAD.t + ih - ((v - min) / (max - min)) * ih;
-  const path = (key) => smoothPath(pts.map((_, i) => x(i)), pts.map((p) => y(p[key])));
-  const zeroY = y(0);
-  const negative = values.some((v) => v < 0);
-  const overlay = [];
+  const x = (i) => PAD.l + (i / (pts.length - 1)) * iw;
+  const y = (v) => PAD.t + ih - ((v - lo) / (hi - lo)) * ih;
+  const y0 = y(0);
+  const zero = Math.min(1, Math.max(0, y0 / H));
+  const line = smoothPath(pts.map((p, i) => [x(i), y(p.value)]));
+  const stop = (offset, color, opacity = 1) => svg('stop', { offset, style: `stop-color:var(${color});stop-opacity:${opacity}` });
+  const gradient = (id, top, base) => svg('linearGradient', { id, gradientUnits: 'userSpaceOnUse', x1: 0, y1: 0, x2: 0, y2: H },
+    stop(0, '--pos', top), stop(zero, '--pos', base), stop(zero, '--neg', base), stop(1, '--neg', top));
 
-  // o gráfico é um seletor de dia: toque, arraste ou setas do teclado
+  const lowest = pts.reduce((a, b) => (b.value < a.value ? b : a));
+  const dm = (d) => formatDayMonth(d, Number(ctx.today.slice(0, 4)));
   const root = svg('svg', {
-    viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'slider', tabindex: '0',
-    'aria-label': 'Saldo projetado. Use as setas para mudar o dia.',
-    'aria-valuemin': 0, 'aria-valuemax': pts.length - 1,
+    viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', tabindex: 0,
+    'aria-label': `Saldo previsto das contas de gasto: ${formatBRL(proj.start)} agora, ${formatBRL(pts[pts.length - 1].value)} em ${dm(proj.end)}. Menor saldo: ${formatBRL(lowest.value)} em ${dm(lowest.date)}.`,
+  });
+  root.append(svg('defs', {}, gradient('tl-line', 1, 1), gradient('tl-area', 0.3, 0)));
+  // verde acima de zero, vermelho abaixo: a cor da linha é o estado do saldo
+  root.append(svg('path', { d: `${line}L${x(pts.length - 1).toFixed(1)},${y0.toFixed(1)}L${x(0).toFixed(1)},${y0.toFixed(1)}Z`, class: 'area', fill: 'url(#tl-area)' }));
+  root.append(svg('line', { x1: PAD.l, x2: W - PAD.r, y1: y0, y2: y0, class: 'base' }));
+  root.append(svg('path', { d: line, class: 'line', stroke: 'url(#tl-line)' }));
+
+  // um ponto em cada dia com receita (verde) ou pagamento (cinza)
+  pts.forEach((p, i) => {
+    const net = p.events.reduce((s, e) => s + flowInto(e, ids), 0);
+    if (net) root.append(svg('circle', { cx: x(i), cy: y(p.value), r: 3.5, class: `mk ${net > 0 ? 'in' : 'out'}` }));
   });
 
-  // recortes acima/abaixo do zero: o que fica abaixo de R$ 0 aparece em vermelho
-  root.append(svg('defs', {},
-    // degradê da área: forte junto à linha, some no zero (e o vermelho some para baixo)
-    svg('linearGradient', { id: 'tl-fill', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: PAD.t, y2: zeroY },
-      svg('stop', { offset: 0, class: 'fill-a' }), svg('stop', { offset: 1, class: 'fill-b' })),
-    svg('linearGradient', { id: 'tl-fill-neg', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: zeroY, y2: bottom },
-      svg('stop', { offset: 0, class: 'fill-neg-b' }), svg('stop', { offset: 1, class: 'fill-neg-a' })),
-    svg('clipPath', { id: 'tl-above' }, svg('rect', { x: 0, y: 0, width: W, height: zeroY })),
-    svg('clipPath', { id: 'tl-below' }, svg('rect', { x: 0, y: zeroY, width: W, height: H - zeroY }))));
-
-  // área leve entre a linha e o zero: azul acima, vermelha abaixo
-  const last = x(pts.length - 1).toFixed(1);
-  const area = `${path('spending')}L${last},${zeroY.toFixed(1)}L${x(0).toFixed(1)},${zeroY.toFixed(1)}Z`;
-  root.append(svg('path', { d: area, class: 'area', 'clip-path': 'url(#tl-above)' }));
-  if (negative) root.append(svg('path', { d: area, class: 'area under', 'clip-path': 'url(#tl-below)' }));
-
-  // única referência do eixo y: o zero
-  root.append(svg('line', { x1: PAD.l, x2: W - PAD.r + 4, y1: zeroY, y2: zeroY, class: 'zero' }));
-  overlay.push(label('chart-y', 'R$ 0', { y: zeroY }));
-
-  // a linha: saldo se gastar o limite todo dia
-  root.append(svg('path', { d: path('spending'), class: 'line', 'clip-path': 'url(#tl-above)' }));
-  if (negative) root.append(svg('path', { d: path('spending'), class: 'line under', 'clip-path': 'url(#tl-below)' }));
-
-  // eixo x: hoje, próximo salário (marquinha no pé) e fim
-  const salIdx = ctx.budget.nextSalary ? pts.findIndex((p) => p.date === ctx.budget.nextSalary.date) : -1;
-  overlay.push(label('chart-x start', 'hoje', { x: x(0) }));
-  if (salIdx >= 8 && salIdx < pts.length - 8) {
-    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: bottom - 3, y2: bottom + 4, class: 'salary-tick' }));
-    overlay.push(label('chart-x strong', `salário ${formatShort(pts[salIdx].date)}`, { x: x(salIdx) }));
+  // âncoras de tempo: hoje, o próximo salário e o fim
+  const last = pts.length - 1;
+  root.append(svg('text', { x: x(0), y: H - 4, class: 'axis', 'text-anchor': 'start' }, 'Hoje'));
+  root.append(svg('text', { x: x(last), y: H - 4, class: 'axis', 'text-anchor': 'end' }, formatShort(pts[last].date)));
+  const sal = ctx.budget.nextSalary;
+  const salIdx = sal ? pts.findIndex((p) => !p.now && p.date === sal.date) : -1;
+  if (salIdx > 0 && x(salIdx) > 70 && x(salIdx) < W - 80) {
+    root.append(svg('text', { x: x(salIdx), y: H - 4, class: 'axis', 'text-anchor': 'middle' }, short(sal.name)));
   }
-  overlay.push(label('chart-x end', formatShort(pts[pts.length - 1].date), { x: x(pts.length - 1) }));
 
-  // seleção: linha vertical + ponto; o valor aparece no painel acima
-  const cross = svg('line', { y1: PAD.t, y2: bottom, class: 'cross' });
-  const dot = svg('circle', { r: 5, class: 'dot' });
+  // seleção: o dedo escolhe o dia; o valor aparece grande, acima do gráfico
+  const cross = svg('line', { y1: PAD.t - 6, y2: y0, class: 'cross' });
+  const dot = svg('circle', { r: 5.5, class: 'dot' });
   root.append(cross, dot);
 
-  const note = negative ? h('p', { class: 'chart-note' }, 'Abaixo de R$ 0, em vermelho, faltaria dinheiro.') : null;
-
-  const rDate = h('p', { class: 'readout-date' });
-  const rRel = h('span', { class: 'readout-rel' });
-  const rValue = h('span', { class: 'readout-value' });
+  const rDate = h('span', { class: 'readout-date' });
+  const rRel = h('span', {});
+  const rValue = h('p', { class: 'amount lg', 'data-fit': true });
   const rEvents = h('p', { class: 'readout-events' });
   const readout = h('div', { class: 'readout', 'aria-live': 'polite' },
-    h('div', { class: 'readout-head' }, rDate, rRel),
-    h('div', { class: 'readout-main' }, rValue, h('span', { class: 'readout-caption' }, 'de saldo, se gastar o limite todo dia')),
-    rEvents);
+    h('p', { class: 'readout-top' }, rDate, rRel), rValue, rEvents);
 
   let current = 0;
+  let touched = false;
   const select = (i) => {
-    current = i;
-    const p = pts[i];
-    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i));
-    dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(p.spending));
-    dot.classList.toggle('under', p.spending < 0);
-    rDate.textContent = formatLong(p.date);
-    rRel.textContent = relative(ctx.today, p.date);
-    rValue.textContent = formatBRL(p.spending);
-    rValue.classList.toggle('neg', p.spending < 0);
-    rEvents.replaceChildren(...(p.dayEvents.length ? [] : [h('span', { class: 'muted' }, 'Nenhum evento neste dia')]), ...p.dayEvents.map((e) => {
-      const sign = e.kind === 'income' ? 1 : -1;
-      return h('span', { class: 'ev-item' }, h('span', { class: 'li-sub' }, e.name),
-        h('span', { class: `ev-amt ${sign > 0 ? 'pos' : ''}` }, formatSigned(e.amount, sign, { short: true })));
-    }));
-    root.setAttribute('aria-valuenow', i);
-    root.setAttribute('aria-valuetext', `${formatLong(p.date)}: ${formatBRL(p.spending)} de saldo, se gastar o limite todo dia`);
+    current = Math.max(0, Math.min(last, i));
+    const p = pts[current];
+    cross.setAttribute('x1', x(current)); cross.setAttribute('x2', x(current));
+    dot.setAttribute('cx', x(current)); dot.setAttribute('cy', y(p.value));
+    dot.classList.toggle('neg', p.value < 0);
+    rDate.textContent = p.now ? 'Agora' : current === 1 ? 'Hoje, fim do dia' : formatLong(p.date);
+    rRel.textContent = current > 1 ? relative(ctx.today, p.date) : '';
+    rValue.replaceChildren(...amountParts(formatBRL(p.value)));
+    rValue.classList.toggle('neg', p.value < 0);
+    rEvents.textContent = p.events.length
+      ? p.events.map((e) => `${formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })} ${e.name}`).join('   ')
+      : touched ? '' : 'Toque no gráfico para ver cada dia';
   };
   const pick = (clientX) => {
     const r = root.getBoundingClientRect();
     const sx = ((clientX - r.left) / r.width) * W;
-    select(Math.max(0, Math.min(pts.length - 1, Math.round(((sx - PAD.l) / iw) * (pts.length - 1)))));
+    touched = true;
+    select(Math.round(((sx - PAD.l) / iw) * last));
   };
-  root.addEventListener('pointermove', (e) => pick(e.clientX));
-  root.addEventListener('pointerdown', (e) => pick(e.clientX));
-  // toque e clique escolhem o dia sem levar o foco (o anel fica só para o teclado)
-  root.addEventListener('mousedown', (e) => e.preventDefault());
+  // preventDefault: o toque escolhe o dia sem levar o foco (o anel de foco fica para o teclado)
+  root.addEventListener('pointerdown', (e) => { e.preventDefault(); pick(e.clientX); });
+  root.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons || e.pressure > 0) pick(e.clientX); });
   root.addEventListener('keydown', (e) => {
-    const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 7, PageDown: -7 }[e.key];
-    if (e.key === 'Home') select(0);
-    else if (e.key === 'End') select(pts.length - 1);
-    else if (step) select(Math.max(0, Math.min(pts.length - 1, current + step)));
-    else return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
+    touched = true;
+    select(current + (e.key === 'ArrowRight' ? 1 : -1));
   });
-  // começa mostrando a véspera do salário (o ponto mais apertado do período)
-  select(Math.max(0, pts.findIndex((p) => p.date === ctx.budget.horizonEnd)));
+  select(0);
 
-  return { readout, note, chart: h('div', { class: 'chart-wrap' }, root, overlay) };
+  // o que passa abaixo de zero ganha uma frase: a cor sozinha não explica
+  const firstNeg = pts.find((p) => p.value < 0);
+  const note = firstNeg && h('p', { class: 'chart-note' },
+    `Em ${dm(firstNeg.date)} o saldo fica negativo: as contas previstas passam do que você tem, mesmo gastando só o limite.`);
+  return { readout, note, chart: h('div', { class: 'chart-wrap' }, root) };
 }
 
 function eventList(ctx, proj) {
@@ -164,7 +152,7 @@ function eventList(ctx, proj) {
   if (!groups.size) return h('p', { class: 'empty' }, 'Nada previsto para o período.');
   const def = ctx.state.settings.defaultAccountId;
   const accName = (id) => store.getAccount(id)?.name ?? 'conta excluída';
-  // conta só aparece quando não é a padrão; atraso sempre aparece
+  // conta só aparece quando não é a dos gastos do dia; atraso sempre aparece
   const sub = (e) => {
     if (e.overdue) return `Atrasado, previsto para ${formatDayMonth(e.date, Number(ctx.today.slice(0, 4)))}`;
     if (e.originalDate && e.date !== e.originalDate) return `Data mudada, era ${formatDayMonth(e.originalDate, Number(ctx.today.slice(0, 4)))}`;
@@ -172,12 +160,12 @@ function eventList(ctx, proj) {
     return e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
   };
   return h('div', {}, [...groups].map(([date, evs]) => h('div', { class: 'day-group' },
-    h('div', { class: 'day-head' }, h('strong', {}, formatLong(date)), h('span', { class: 'muted' }, relative(ctx.today, date))),
-    evs.map((e) => h('button', { class: 'ev', onclick: () => eventSheet(e) },
-      h('span', { class: `ev-dot ${e.kind === 'income' ? 'in' : 'out'}` }),
-      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: 'li-sub' }, sub(e))),
-      h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` },
-        formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })))))));
+    h('div', { class: 'day-head' }, h('strong', {}, formatLong(date)), h('span', {}, relative(ctx.today, date))),
+    h('ul', { class: 'list' }, evs.map((e) => h('li', {}, h('button', { class: 'list-item', onclick: () => eventSheet(e) },
+      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: `li-sub ${e.overdue ? 'warn-text' : ''}` }, sub(e))),
+      h('span', { class: 'li-end' },
+        h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` }, formatSigned(e.amount, e.kind === 'income' ? 1 : -1, { short: true })),
+        icon('chevron', { size: 18, cls: 'chev' })))))))));
 }
 
 export function renderTimeline(ctx) {
@@ -185,12 +173,10 @@ export function renderTimeline(ctx) {
   const c = chart(ctx, proj);
   return h('div', { class: 'screen timeline' },
     h('header', { class: 'screen-head' },
-      h('h1', {}, 'Linha do tempo'),
-      h('p', { class: 'sub' }, 'Toque ou arraste no gráfico para ver cada dia')),
-    h('section', { class: 'card' },
-      c.readout,
-      c.chart,
-      c.note),
+      h('div', { class: 'titles' },
+        h('h1', {}, 'Linha do tempo'),
+        h('p', { class: 'sub' }, 'Saldo previsto, gastando o limite de cada dia'))),
+    h('section', { class: 'card chart-card' }, c.readout, c.chart, c.note),
     h('h2', { class: 'section-label' }, 'Próximos eventos'),
     h('section', { class: 'card flush' }, eventList(ctx, proj),
       addButton('Agendar receita', () => editIncome(null, { draft: { rule: { type: 'once', date: addDays(ctx.today, 1) } } }))));

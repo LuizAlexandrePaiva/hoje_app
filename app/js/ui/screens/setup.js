@@ -1,7 +1,7 @@
 // Assistente do primeiro acesso: cadastra contas, receitas, despesas, metas
 // e parâmetros. Cada passo salva no aparelho, então dá para fechar e voltar.
 
-import { h, confirmDialog } from '../dom.js';
+import { h } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { accountsList, incomesList, expensesList, goalsList, contributionsList } from '../editors.js';
@@ -22,7 +22,7 @@ const STEPS = [
   {
     title: 'Receitas',
     lead: 'Receitas que se repetem todo mês.',
-    tips: ['Marque o salário: o orçamento vai até a véspera dele.', 'Nada entra no saldo antes de você confirmar.'],
+    tips: ['Marque o salário: a linha do tempo vai até um mês depois dele.', 'Nada entra no saldo antes de você confirmar.'],
     render: (s) => [incomesList(s, null)],
   },
   {
@@ -58,10 +58,10 @@ function welcome() {
       h('img', { src: 'icons/icon-192.png', alt: '', width: 88, height: 88 }),
       h('h1', {}, 'Hoje'),
       h('p', { class: 'lead' }, 'Quanto você pode gastar hoje sem faltar dinheiro até o salário.')),
-    h('ul', { class: 'features' },
+    h('section', { class: 'card' }, h('ul', { class: 'features' },
       feature('sun', 'Limite do dia', 'Recalculado todo dia com o saldo real.'),
       feature('transfer', 'Hora de resgatar', 'Avisa quando a conta precisa de reforço.'),
-      feature('wallet', 'Privado', 'Funciona offline. Backup só com criptografia.')),
+      feature('wallet', 'Privado', 'Funciona offline. Backup só com criptografia.'))),
   ];
 }
 
@@ -72,11 +72,9 @@ export function renderSetup(ctx) {
   const last = step === STEPS.length - 1;
 
   const err = h('p', { class: 'form-error', role: 'alert' });
-  const next = async () => {
+  const next = () => {
     const ok = cur.valid ? cur.valid(state) : true;
     if (ok !== true) { err.textContent = ok; return; }
-    if (step === 2 && !state.incomes.some((i) => i.isSalary)
-      && !(await confirmDialog('Nenhum salário marcado', 'Sem salário, o orçamento usa a próxima receita (ou 30 dias).', 'Seguir assim'))) return;
     if (last) {
       store.finishSetup();
       ctx.navigate('#/hoje', { replace: true });
@@ -90,10 +88,9 @@ export function renderSetup(ctx) {
     step > 0 && h('div', {
       class: 'steps', role: 'progressbar', 'aria-label': 'Configuração',
       'aria-valuemin': 1, 'aria-valuemax': STEPS.length - 1, 'aria-valuenow': step, 'aria-valuetext': `Passo ${step} de ${STEPS.length - 1}`,
-    },
-    STEPS.slice(1).map((_, i) => h('span', { class: i < step ? 'on' : '' })),
-    h('span', { class: 'step-count', 'aria-hidden': 'true' }, `${step} de ${STEPS.length - 1}`)),
-    cur.title && h('header', { class: 'screen-head' }, h('h1', {}, cur.title), cur.lead && h('p', { class: 'sub' }, cur.lead)),
+    }, STEPS.slice(1).map((_, i) => h('span', { class: i < step ? 'on' : '' }))),
+    step > 0 && h('p', { class: 'step-count', 'aria-hidden': 'true' }, `Passo ${step} de ${STEPS.length - 1}`),
+    cur.title && h('header', { class: 'screen-head' }, h('div', { class: 'titles' }, h('h1', {}, cur.title), cur.lead && h('p', { class: 'sub' }, cur.lead))),
     cur.tips && h('div', { class: 'stack-sm' }, cur.tips.map(tip)),
     cur.render(state),
     err,

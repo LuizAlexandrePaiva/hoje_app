@@ -26,12 +26,14 @@ function fromUTC(ms) {
   return iso(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
 }
 
+// en-CA formata como AAAA-MM-DD; um formatador só, porque criar um a cada chamada custa caro
+const DAY_FORMAT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
 /** Dia de hoje no fuso de São Paulo, independente do fuso do aparelho. */
 export function todayISO(now = new Date()) {
-  // en-CA formata como AAAA-MM-DD
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(now);
+  return DAY_FORMAT.format(now);
 }
 
 export function addDays(s, n) {
@@ -59,6 +61,13 @@ export function monthKey(s) {
 export function addMonths(y, m, n) {
   const idx = y * 12 + (m - 1) + n;
   return { y: Math.floor(idx / 12), m: (idx % 12) + 1 };
+}
+
+/** Mês 'AAAA-MM' deslocado n meses. */
+export function shiftMonth(mk, n) {
+  const [y, m] = mk.split('-').map(Number);
+  const r = addMonths(y, m, n);
+  return `${r.y}-${pad(r.m)}`;
 }
 
 export function isValidISO(s) {
@@ -98,6 +107,12 @@ export function formatHeader(s) {
 export function formatDayMonth(s, refYear) {
   const { y, m, d } = parts(s);
   return `${d} de ${MONTHS[m - 1].slice(0, 3)}${refYear && y !== refYear ? ` de ${y}` : ''}`;
+}
+
+/** "novembro de 2026" a partir de 'AAAA-MM' */
+export function formatMonth(mk) {
+  const [y, m] = mk.split('-').map(Number);
+  return `${MONTHS[m - 1]} de ${y}`;
 }
 
 /** "hoje", "amanhã", "em 3 dias", "há 2 dias" */

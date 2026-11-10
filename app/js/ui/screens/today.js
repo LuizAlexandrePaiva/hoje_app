@@ -1,21 +1,22 @@
-import { h } from '../dom.js';
+// Hoje: quanto ainda dá para gastar, o que o app precisa de você e o que já foi lançado.
+
+import { h, sheet, amount } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
-import { formatBRL, formatBRLShort, formatSigned } from '../../core/money.js';
+import { formatBRL, formatBRLShort, formatSigned, formatPercent } from '../../core/money.js';
 import { formatHeader, formatDayMonth, relative, addDays, TIME_ZONE } from '../../core/dates.js';
 import { openEvents, pendingConfirmations } from '../../core/schedule.js';
-import { confirmOccurrenceSheet, transferSheet, eventSheet, transactionSheet } from '../editors.js';
+import { confirmOccurrenceSheet, transferSheet, eventSheet, transactionSheet, savingSheet, TX_LABEL } from '../editors.js';
 import { backupBanner } from '../backup.js';
 
-const ASK = { income: 'Recebeu?', expense: 'Pagou?', contribution: 'Aportou?' };
 const timeFmt = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: TIME_ZONE });
-const dayMonth = (d) => formatDayMonth(d, Number(d.slice(0, 4)));
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 export function refillSheet(ctx) {
   const { refill } = ctx;
   const to = store.getAccount(refill.toAccountId);
   const span = refill.cutByIncome
-    ? `até ${refill.cutByIncome.name} cair (${dayMonth(refill.cutByIncome.date)})`
+    ? `até ${refill.cutByIncome.name} cair (${formatDayMonth(refill.cutByIncome.date)})`
     : `${refill.periodDays} dias de gastos`;
   transferSheet({
     from: refill.fromAccountId,
@@ -30,64 +31,155 @@ export function refillSheet(ctx) {
   });
 }
 
-function pendingCard(ctx) {
-  const pend = pendingConfirmations(ctx.state, ctx.today);
-  if (!pend.length) return null;
-  return h('section', { class: 'card flush', 'aria-label': 'A confirmar' },
-    h('ul', { class: 'list' }, pend.map((e) => h('li', { class: 'row-item' },
-      h('span', { class: 'li-main' },
-        h('span', { class: 'li-title' }, `${e.name} ${formatBRLShort(e.amount)}`),
-        h('span', { class: 'li-sub' }, e.overdue ? `Previsto para ${dayMonth(e.date)}` : 'Previsto para hoje')),
-      h('button', { class: 'btn small primary', onclick: () => confirmOccurrenceSheet(e) }, ASK[e.kind])))));
+/** "8 de nov" em frases; com o ano quando não é o de hoje (a conta olha 12 meses à frente). */
+const dayLabel = (date, today) => formatDayMonth(date, Number(today.slice(0, 4)));
+
+/** "Salário", "Salário e Aluguel" ou "3 receitas". */
+function pendingNames(list) {
+  if (list.length === 1) return list[0].name;
+  if (list.length === 2) return `${list[0].name} e ${list[1].name}`;
+  return `${list.length} receitas`;
+}
+
+/** Por que não há folga: faltam as contas ou só a margem de segurança. */
+function noRoomText(b) {
+  const day = dayLabel(b.limitingDay, b.today);
+  const short = -b.untilLimit.available;
+  if (b.cushion > 0 && short <= b.cushion) {
+    return b.limitingDay === b.today
+      ? `O saldo está ${formatBRL(short)} abaixo da margem de segurança.`
+      : `As contas até ${day} usam ${formatBRL(short)} da margem de segurança.`;
+  }
+  return `Faltam ${formatBRL(b.shortfall)} para pagar as contas previstas até ${day}.`;
+}
+
+/** A conta que leva ao limite do dia, passo a passo. */
+function explainSheet(ctx) {
+  const b = ctx.budget;
+  const u = b.untilLimit;
+  const day = dayLabel(b.limitingDay, b.today);
+  const row = (k, v, cls = '') => [h('span', { class: `k ${cls}` }, k), h('span', { class: `v ${cls}` }, v)];
+  const scope = b.lookDays >= 365
+    ? 'O limite é o maior valor que dá para gastar todo dia sem faltar dinheiro em nenhum dia dos próximos 12 meses.'
+    : b.nextSalary
+      ? `O limite faz o dinheiro durar até ${dayLabel(b.lookEnd, b.today)}, 30 dias depois da última receita prevista.`
+      : `Sem receita prevista, o limite faz o dinheiro durar ${b.lookDays} dias.`;
+  const tight = b.limitingDay === b.today ? 'O dia mais apertado é hoje.'
+    : b.nextSalary && b.limitingDay === b.horizonEnd ? `O dia mais apertado é ${day}, véspera de ${b.nextSalary.name}. A conta vai até ele.`
+      : `O dia mais apertado é ${day}. A conta vai até ele.`;
+  const n = b.waiting.length;
+  sheet('Como o limite é calculado', (close) => [
+    h('p', { class: 'sheet-lead' }, scope),
+    h('p', { class: 'sheet-lead' }, tight),
+    h('div', { class: 'calc' },
+      row(b.spentToday > 0 ? 'Saldo no começo do dia' : 'Saldo nas contas de gasto', formatBRL(b.spendableStart)),
+      b.cushion > 0 && row('Margem de segurança', formatSigned(b.cushion, -1)),
+      u.incomes > 0 && row('Receitas previstas', formatSigned(u.incomes, 1)),
+      u.outflows > 0 && row('Despesas fixas e aportes', formatSigned(u.outflows, -1)),
+      row(u.days === 1 ? 'Dias' : `Dias até ${day}`, `÷ ${u.days}`),
+      h('span', { class: 'rule' }),
+      row('Limite por dia', formatBRL(b.dailyBudget), `total ${b.dailyBudget < 0 ? 'neg' : ''}`)),
+    n > 0 && h('p', { class: 'sheet-lead' }, `Falta confirmar ${pendingNames(b.waiting)}. Até lá, fica liberado só o que caberia sem ${n === 1 ? 'essa receita' : 'essas receitas'}: ${formatBRL(Math.max(b.safeBudget, 0))} por dia.`),
+    h('div', { class: 'calc' },
+      row('Amanhã, sem gastar mais nada hoje', formatBRL(ctx.tomorrow.dailyBudget), 'total')),
+    h('p', { class: 'field-hint' }, 'A conta é refeita todo dia com o saldo real. O que sobra hoje é repartido pelos próximos dias; o que passa do limite é descontado deles.'),
+    h('button', { class: 'btn primary block', onclick: close }, 'Entendi'),
+  ]);
 }
 
 function hero(ctx) {
-  const { dailyBudget, remainingToday, spentToday, horizonEnd, limitingDay, shortfall } = ctx.budget;
-  const noRoom = dailyBudget < 0; // as contas previstas já passam do dinheiro disponível
+  const b = ctx.budget;
+  const { dailyBudget, remainingToday, spentToday, heldToday } = b;
+  const noRoom = dailyBudget < 0; // as contas já passam do dinheiro disponível
   const over = !noRoom && remainingToday < 0;
-  const pct = dailyBudget > 0 ? Math.min(100, Math.max(0, (spentToday / dailyBudget) * 100)) : 100;
-
-  if (noRoom) {
-    return h('section', { class: 'hero', 'aria-label': 'Quanto resta para hoje' },
-      h('p', { class: 'hero-label' }, `Sem folga até ${dayMonth(limitingDay)}`),
-      h('p', { class: 'hero-value neg', 'data-fit': true }, formatBRL(0)),
-      h('p', { class: 'hero-meta' }, 'Faltam ', h('strong', {}, formatBRL(shortfall)), ` para pagar as contas previstas até ${dayMonth(limitingDay)}.`),
-      h('button', { class: 'btn small quiet hero-link', onclick: () => ctx.navigate('#/linha') }, 'Ver contas na Linha do tempo', icon('chevron', { size: 16 })));
-  }
-
-  const label = over ? 'Passou do limite hoje' : 'Resta para hoje';
-  const value = over ? -remainingToday : remainingToday;
-  return h('section', { class: 'hero', 'aria-label': 'Quanto resta para hoje' },
-    h('p', { class: 'hero-label' }, label),
-    h('p', { class: `hero-value ${over ? 'neg' : ''}`, 'data-fit': true }, formatBRL(value)),
-    h('p', { class: 'hero-meta' }, `Limite de ${formatBRL(dailyBudget)} por dia até ${dayMonth(horizonEnd)}`),
-    spentToday > 0 && h('div', { class: 'meter', role: 'progressbar', 'aria-label': 'Quanto do limite já foi gasto', 'aria-valuenow': Math.round(pct), 'aria-valuemin': 0, 'aria-valuemax': 100 },
-      h('span', { style: `width:${pct}%`, class: over ? 'over' : '' })),
-    spentToday > 0 && h('p', { class: 'hero-meta' }, `${formatBRL(spentToday)} gastos hoje`));
+  const held = !noRoom && !over && heldToday > 0; // parte do limite espera a confirmação de uma receita
+  const left = dailyBudget > 0 ? Math.min(100, Math.max(0, (remainingToday / dailyBudget) * 100)) : 0;
+  const label = noRoom ? `Sem folga até ${dayLabel(b.limitingDay, b.today)}` : over ? 'Passou do limite' : 'Resta para gastar';
+  const tone = noRoom || over ? 'neg' : remainingToday > 0 ? 'pos' : '';
+  return h('section', { class: 'hero', 'aria-label': 'Quanto resta para gastar hoje' },
+    h('div', { class: 'hero-top' },
+      h('p', { class: 'hero-label' }, label),
+      h('button', { class: 'icon-btn', 'aria-label': 'Como o limite é calculado', onclick: () => explainSheet(ctx) }, icon('info', { size: 20 }))),
+    amount(formatBRL(noRoom ? 0 : over ? -remainingToday : remainingToday), `hero-value ${tone}`, { 'data-fit': true }),
+    h('div', {
+      class: `meter ${over || noRoom ? 'over' : ''}`, role: 'progressbar', 'aria-label': 'Quanto do limite de hoje ainda resta',
+      'aria-valuenow': Math.round(left), 'aria-valuemin': 0, 'aria-valuemax': 100,
+    }, h('span', { style: `width:${left}%` })),
+    noRoom
+      ? [h('p', { class: 'hero-foot' }, noRoomText(b)),
+        h('button', { class: 'btn small quiet hero-link', onclick: () => ctx.navigate('#/linha') }, 'Ver contas na Linha do tempo', icon('chevron', { size: 16 }))]
+      : h('p', { class: 'hero-foot' },
+        h('span', {}, spentToday > 0 ? `Gastou ${formatBRL(spentToday)} de ${formatBRL(dailyBudget)}` : 'Nada gasto hoje'),
+        h('span', { class: 'tomorrow' }, 'Amanhã ', h('strong', { class: ctx.tomorrow.dailyBudget < 0 ? 'neg' : '' }, formatBRL(ctx.tomorrow.dailyBudget)))),
+    held && h('p', { class: 'hero-note' }, `Libera ${formatBRL(heldToday)} ao confirmar ${pendingNames(b.waiting)}.`));
 }
 
-function coverageCard(ctx) {
+/** Receitas, despesas e aportes com data vencida ou de hoje, esperando confirmação. */
+function pendingCard(ctx) {
+  const pend = pendingConfirmations(ctx.state, ctx.today);
+  if (!pend.length) return null;
+  return [
+    h('h2', { class: 'section-label' }, 'Para confirmar'),
+    h('section', { class: 'card flush confirm' },
+      pend.map((e) => h('div', { class: 'row-item' },
+        h('span', { class: 'dot warn', 'aria-hidden': 'true' }),
+        h('span', { class: 'li-main' },
+          h('span', { class: 'li-title' }, e.name),
+          h('span', { class: 'li-sub' }, `${formatBRLShort(e.amount)}, ${e.overdue ? `previsto para ${dayLabel(e.date, ctx.today)}` : 'previsto para hoje'}`)),
+        h('button', { class: 'btn small tonal-warn', 'aria-label': `Confirmar ${e.name}`, onclick: () => confirmOccurrenceSheet(e) }, 'Confirmar')))),
+  ];
+}
+
+/** Quanto guardar das receitas dos últimos 7 dias. Opcional: sem âmbar; some enquanto há resgate a fazer. */
+function savingCard(ctx) {
+  if (!ctx.savings?.length || ctx.refill.show) return null;
+  return [
+    h('h2', { class: 'section-label' }, 'Poupança sugerida'),
+    h('section', { class: 'card flush' },
+      ctx.savings.map((s) => h('div', { class: 'row-item' },
+        h('span', { class: 'li-main' },
+          h('span', { class: 'li-title' }, s.tx.desc || 'Receita'),
+          h('span', { class: 'li-sub' }, `${formatBRLShort(s.amount)} (${formatPercent(s.bps)} do que entrou)`)),
+        h('button', {
+          class: 'btn small', 'aria-label': `Guardar ${formatBRLShort(s.amount)} de ${s.tx.desc || 'receita'}`,
+          onclick: () => savingSheet(s.tx.id),
+        }, 'Guardar')))),
+  ];
+}
+
+function coverageText(cov) {
+  if (cov == null) return null;
+  if (cov >= 365) return 'Cobre mais de um ano';
+  if (cov === 0) return 'Não cobre o dia de hoje';
+  if (cov === 1) return 'Cobre só hoje';
+  return `Cobre ${cov} dias`;
+}
+
+/** Conta dos gastos do dia: aviso de resgate quando está baixa; senão, saldo e cobertura. */
+function accountCard(ctx) {
   const { refill, surplus, state } = ctx;
   const acc = store.getAccount(state.settings.defaultAccountId);
   if (!acc) return null;
-  const cov = refill.coverage;
   const reserve = store.getAccount(refill.fromAccountId);
-  const low = refill.show;
-  const covText = cov == null ? null
-    : cov === 0 ? 'Não cobre o limite de hoje'
-      : cov >= 365 ? 'Cobre mais de um ano'
-        : `Cobre ${cov} ${cov === 1 ? 'dia' : 'dias'}`;
-  const span = refill.cutByIncome ? `até ${refill.cutByIncome.name} cair` : `${refill.periodDays} dias`;
-  return h('section', { class: `card ${low ? '' : 'flush'}` },
-    h('div', { class: low ? 'row between gap' : 'row-item' },
+  const cov = coverageText(refill.coverage);
+  if (refill.show) {
+    const span = refill.cutByIncome ? `até ${refill.cutByIncome.name} cair` : plural(refill.periodDays, 'dia', 'dias');
+    return h('section', { class: 'card alert' },
+      h('div', { class: 'alert-head' },
+        icon('alert', { size: 22 }),
+        h('span', { class: 'li-main' },
+          h('span', { class: 'li-title' }, 'Hora de resgatar'),
+          h('span', { class: 'li-sub' }, `${acc.name} tem ${formatBRL(acc.balance)}${cov ? `. ${cov}.` : '.'}`))),
+      h('button', { class: 'btn warn block', onclick: () => refillSheet(ctx) }, icon('transfer', { size: 20 }), `Resgatar ${formatBRLShort(refill.amount)}`),
+      h('p', { class: 'caption center' }, `De ${reserve?.name}, para cobrir ${span}`));
+  }
+  return h('section', { class: 'card flush' },
+    h('div', { class: 'row-item' },
       h('span', { class: 'li-main' },
         h('span', { class: 'li-title' }, acc.name),
-        covText && h('span', { class: `li-sub ${low ? 'warn-text' : ''}` },
-          low ? h('span', { class: 'status' }, icon('alert', { size: 15 }), covText) : covText)),
+        cov && h('span', { class: 'li-sub' }, cov)),
       h('span', { class: `li-value ${acc.balance < 0 ? 'neg' : ''}` }, formatBRL(acc.balance))),
-    low && h('button', { class: 'btn warn block', onclick: () => refillSheet(ctx) }, icon('transfer', { size: 20 }), `Resgatar ${formatBRLShort(refill.amount)}`),
-    low && h('p', { class: 'caption center' }, `De ${reserve?.name}, para cobrir ${span}`),
-    !low && surplus && h('div', { class: 'row-item divided' },
+    surplus && h('div', { class: 'row-item' },
       h('span', { class: 'li-main' },
         h('span', { class: 'li-title pos' }, 'Dinheiro sobrando'),
         h('span', { class: 'li-sub' }, `Dá para aplicar ${formatBRLShort(surplus.amount)} em ${reserve?.name}`)),
@@ -104,25 +196,27 @@ function nextIncome(ctx) {
   return h('section', { class: 'card flush' },
     h('button', { class: 'list-item', onclick: () => eventSheet(next) },
       h('span', { class: 'li-main' },
+        h('span', { class: 'li-over' }, 'Próxima receita'),
         h('span', { class: 'li-title' }, next.name),
-        h('span', { class: 'li-sub' }, `Próximo recebimento, ${relative(ctx.today, next.date)}`)),
+        h('span', { class: 'li-sub' }, relative(ctx.today, next.date))),
       h('span', { class: 'li-end' },
         h('span', { class: 'li-value pos' }, formatSigned(next.amount, 1, { short: true })),
         icon('chevron', { size: 18, cls: 'chev' }))));
 }
 
-function todaySpends(ctx) {
+function todayEntries(ctx) {
   const list = ctx.state.transactions.filter((t) => (t.type === 'spend' || t.type === 'income') && t.date === ctx.today).reverse();
-  if (!list.length) return null;
+  if (!list.length) return h('p', { class: 'hint' }, 'Nenhum lançamento hoje. Toque em + para lançar um gasto ou uma receita.');
   const def = ctx.state.settings.defaultAccountId;
+  const sub = (t) => [t.createdAt && timeFmt.format(new Date(t.createdAt)), (t.from || t.to) !== def && store.getAccount(t.from || t.to)?.name].filter(Boolean).join(', ');
   return [
     h('h2', { class: 'section-label' }, 'Lançamentos de hoje'),
     h('section', { class: 'card flush' },
       h('ul', { class: 'list' }, list.map((t) => h('li', {},
         h('button', { class: 'list-item', onclick: () => transactionSheet(t) },
           h('span', { class: 'li-main' },
-            h('span', { class: `li-title ${t.desc ? '' : 'is-placeholder'}` }, t.desc || (t.type === 'income' ? 'Receita' : 'Gasto')),
-            h('span', { class: 'li-sub' }, [t.createdAt && timeFmt.format(new Date(t.createdAt)), (t.from || t.to) !== def && store.getAccount(t.from || t.to)?.name].filter(Boolean).join(', '))),
+            h('span', { class: `li-title ${t.desc ? '' : 'muted'}` }, t.desc || TX_LABEL[t.type]),
+            sub(t) && h('span', { class: 'li-sub' }, sub(t))),
           t.type === 'income'
             ? h('span', { class: 'li-value pos' }, formatSigned(t.amount, 1))
             : h('span', { class: 'li-value' }, formatSigned(t.amount, -1))))))),
@@ -131,14 +225,14 @@ function todaySpends(ctx) {
 
 export function renderToday(ctx) {
   return h('div', { class: 'screen today' },
-    h('header', { class: 'screen-head' }, h('h1', {}, 'Hoje'), h('p', { class: 'sub' }, formatHeader(ctx.today))),
-    pendingCard(ctx),
+    h('header', { class: 'screen-head' },
+      h('div', { class: 'titles' }, h('h1', {}, 'Hoje'), h('p', { class: 'sub' }, formatHeader(ctx.today))),
+      h('button', { class: 'icon-btn', 'aria-label': 'Ajustes', onclick: () => ctx.navigate('#/ajustes') }, icon('sliders', { size: 24 }))),
     hero(ctx),
-    h('div', { class: 'cta-row' },
-      h('button', { class: 'btn primary xl', onclick: () => ctx.navigate('#/gasto') }, icon('plus', { size: 22 }), 'Lançar gasto'),
-      h('button', { class: 'btn xl', onclick: () => ctx.navigate('#/receita') }, icon('plus', { size: 20 }), 'Receita')),
-    coverageCard(ctx),
+    accountCard(ctx),
+    pendingCard(ctx),
+    savingCard(ctx),
     nextIncome(ctx),
     backupBanner(ctx),
-    todaySpends(ctx));
+    todayEntries(ctx));
 }

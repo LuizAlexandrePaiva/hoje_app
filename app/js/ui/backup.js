@@ -165,7 +165,7 @@ export function backupBanner(ctx) {
       h('span', { class: 'li-main' },
         h('span', { class: 'li-title' }, 'Ative o backup'),
         h('span', { class: 'li-sub' }, 'Sem ele, os dados ficam só neste aparelho')),
-      h('button', { class: 'btn small primary', onclick: enableSheet }, 'Ativar'),
+      h('button', { class: 'btn small', onclick: enableSheet }, 'Ativar'),
       h('button', {
         class: 'icon-btn', 'aria-label': 'Lembrar depois',
         onclick: () => { try { localStorage.setItem(BANNER_KEY, String(Date.now())); } catch { /* ok */ } card.remove(); },

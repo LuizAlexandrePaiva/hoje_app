@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { scenario } from './fixtures.js';
+import { computeDailyBudget } from '../app/js/core/budget.js';
 
 // localStorage mínimo para a store rodar no Node
 const mem = new Map();
@@ -53,14 +54,13 @@ test('sugestões: nomes de gastos recentes, sem repetir e sem outros lançamento
 });
 
 test('receita avulsa entra no saldo na hora, não conta como gasto e tem sugestões próprias', async () => {
-  const { computeDailyBudget } = await import('../app/js/core/budget.js');
   const before = computeDailyBudget(store.getState(), '2026-10-26');
   store.addIncome(42000, 'Freela', 'cc');
   const s = store.getState();
   assert.equal(s.accounts.find((a) => a.id === 'cc').balance, 6400 + 42000);
   const after = computeDailyBudget(s, '2026-10-26');
   assert.equal(after.spentToday, 0);
-  assert.equal(after.dailyBudget, Math.round((237900 + 42000) / 14));
+  assert.equal(after.dailyBudget, Math.round((734900 + 42000) / 42)); // 18498: repartida até 6/12
   assert.ok(after.dailyBudget > before.dailyBudget);
   store.addSpend(1000, 'Café');
   assert.deepEqual(store.recentNames('income'), ['Freela']);
@@ -86,6 +86,82 @@ test('papéis das contas: trocar gastos do dia e reserva, sem reserva, nunca sem
   // conta de meta nunca vira conta de gastos
   store.setAccountRole('cc', 'none');
   assert.equal(st().defaultAccountId, 'cdb');
+});
+
+test('poupança: estado antigo carrega com a regra ligada; guardar e dispensar', async () => {
+  const s0 = store.getState();
+  assert.equal(s0.settings.savingsEnabled, true);
+  assert.equal(s0.settings.savingsAccountId, null);
+  const inc = store.addIncome(250000, 'Salário', 'cc');
+  const p = store.saveFromIncome(inc.id, 25000, 'fundo');
+  const s = store.getState();
+  assert.deepEqual([p.type, p.from, p.to, p.amount, p.desc, p.savingOf], ['transfer', 'cc', 'fundo', 25000, 'Poupança: Salário', inc.id]);
+  assert.equal(s.settings.savingsAccountId, 'fundo');
+  assert.deepEqual(s.accounts.map((a) => a.balance), [6400 + 250000 - 25000, 231500, 390000 + 25000]);
+  store.deleteTransaction(p.id);
+  assert.deepEqual(store.getState().accounts.map((a) => a.balance), [256400, 231500, 390000]);
+  store.skipSaving(inc.id);
+  assert.equal(store.getState().transactions.find((t) => t.id === inc.id).savingSkipped, true);
+  assert.equal(JSON.parse(mem.get('hoje:v1')).transactions.find((t) => t.id === inc.id).savingSkipped, true);
+  store.skipSaving(inc.id, false);
+  assert.equal('savingSkipped' in store.getState().transactions.find((t) => t.id === inc.id), false);
+  assert.equal(store.saveFromIncome('nao-existe', 1000, 'fundo'), null);
+  const semNome = store.addIncome(50000, '', 'cc');
+  assert.equal(store.saveFromIncome(semNome.id, 5000, 'fundo').desc, 'Poupança');
+  // chave desligada sobrevive a salvar e carregar
+  store.updateSettings({ savingsEnabled: false });
+  store.load();
+  assert.equal(store.getState().settings.savingsEnabled, false);
+});
+
+test('importar: só aceita o que tem forma de backup; o resto não troca nada', () => {
+  const before = JSON.stringify(store.getState().accounts);
+  for (const bad of ['{}', '[]', '"oi"', '123', 'true', 'null', '{"name":"outro-app","itens":[1,2,3]}', '{"accounts":{}}', '{"app":"outro","accounts":[]}']) {
+    assert.throws(() => store.importJSON(bad), /não é um backup do Hoje/, bad);
+    assert.equal(JSON.stringify(store.getState().accounts), before);
+    assert.equal(JSON.stringify(JSON.parse(mem.get('hoje:v1')).accounts), before);
+  }
+  // exportar e importar continua funcionando, com ou sem o campo "app"
+  const file = store.exportJSON();
+  store.addSpend(1000, 'Depois do backup');
+  store.importJSON(file);
+  assert.equal(store.getState().transactions.length, 0);
+  store.importJSON(JSON.stringify(scenario()));
+  assert.equal(store.getState().accounts.length, 3);
+});
+
+test('margem de segurança suja no backup vira zero; a válida é mantida', () => {
+  for (const dirty of ['50000', -500, 100.5, 'abc', null, NaN]) {
+    const s = scenario();
+    s.settings.cushion = dirty;
+    mem.set('hoje:v1', JSON.stringify(s));
+    store.load();
+    assert.equal(store.getState().settings.cushion, 0, String(dirty));
+    assert.equal(computeDailyBudget(store.getState(), '2026-10-26').dailyBudget, 16993);
+  }
+  const s = scenario();
+  s.settings.cushion = 50000;
+  mem.set('hoje:v1', JSON.stringify(s));
+  store.load();
+  assert.equal(store.getState().settings.cushion, 50000);
+  assert.equal(computeDailyBudget(store.getState(), '2026-10-26').dailyBudget, 13421);
+});
+
+test('guardar parte de uma receita: valida antes de mexer em qualquer saldo', () => {
+  const inc = store.addIncome(100000, 'Freela');
+  const balances = () => JSON.stringify(store.getState().accounts.map((a) => a.balance));
+  const before = balances();
+  for (const [amount, to] of [[NaN, 'fundo'], [10.5, 'fundo'], [0, 'fundo'], [-100, 'fundo'], [5000, 'nope'], [5000, null], [5000, 'cdb']]) {
+    assert.equal(store.saveFromIncome(inc.id, amount, to), null);
+    assert.equal(balances(), before);
+  }
+  assert.equal(store.saveFromIncome('nao-existe', 5000, 'fundo'), null);
+  const t = store.saveFromIncome(inc.id, 5000, 'fundo');
+  assert.equal(t.savingOf, inc.id);
+  assert.equal(store.getAccount('fundo').balance, 390000 + 5000);
+  assert.equal(store.saveFromIncome(inc.id, 5000, 'fundo'), null); // uma poupança por receita
+  store.deleteTransaction(t.id); // desfeita: pode guardar de novo
+  assert.ok(store.saveFromIncome(inc.id, 3000, 'fundo'));
 });
 
 test('"Não veio" pode ser desfeito: a ocorrência volta a ser prevista', () => {

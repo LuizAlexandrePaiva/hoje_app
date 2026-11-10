@@ -3,12 +3,12 @@ import argparse
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-BG = (18, 19, 17, 255)           # --bg
-COIN = (98, 207, 143, 255)       # --pos, verde de destaque do app
-COIN_DARK = (58, 146, 96, 255)   # borda / lateral da moeda
-INK = (7, 36, 20, 255)           # --pos-ink, texto sobre o verde
-# a mesma fonte do app (variável); o R$ usa o peso 700
-FONT = str(Path(__file__).resolve().parent.parent / "app" / "fonts" / "red-hat-text.woff2")
+BG = (11, 12, 15, 255)           # --bg
+COIN = (61, 220, 151, 255)       # --pos, verde de destaque do app
+COIN_DARK = (34, 160, 107, 255)  # borda / lateral da moeda
+INK = (6, 42, 27, 255)           # texto sobre o verde
+# a mesma fonte do app (variável); o R$ usa o peso 800
+FONT = str(Path(__file__).resolve().parent.parent / "app" / "fonts" / "figtree-latin.woff2")
 SS = 4  # supersampling para bordas suaves
 
 
@@ -19,7 +19,7 @@ def coin(d, cx, cy, r, unit):
     rr = r * 0.78  # anel interno
     d.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], outline=COIN_DARK, width=max(1, int(unit * 0.018)))
     font = ImageFont.truetype(FONT, int(r * 0.80))
-    font.set_variation_by_axes([700])
+    font.set_variation_by_axes([800])
     d.text((cx, cy), "R$", font=font, fill=INK, anchor="mm")
 
 

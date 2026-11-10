@@ -1,7 +1,7 @@
 // Service worker: cache-first para os arquivos do app (funciona 100% offline
 // depois da primeira visita). Ao publicar mudanças, aumente CACHE_VERSION.
 
-const CACHE_VERSION = '1.9.3';
+const CACHE_VERSION = '2.0.0';
 const CACHE = `hoje-${CACHE_VERSION}`;
 
 const APP_FILES = [
@@ -9,7 +9,7 @@ const APP_FILES = [
   './index.html',
   './manifest.webmanifest',
   './css/app.css',
-  './fonts/red-hat-text.woff2',
+  './fonts/figtree-latin.woff2',
   './icons/favicon-48.png',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
@@ -20,9 +20,11 @@ const APP_FILES = [
   './js/core/dates.js',
   './js/core/money.js',
   './js/core/businessDays.js',
+  './js/core/invoice.js',
   './js/core/schedule.js',
   './js/core/budget.js',
   './js/core/refill.js',
+  './js/core/savings.js',
   './js/core/projection.js',
   './js/data/ledger.js',
   './js/data/store.js',

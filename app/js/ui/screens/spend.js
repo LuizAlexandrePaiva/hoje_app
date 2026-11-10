@@ -1,23 +1,24 @@
 // Lançar gasto ou receita: teclado numérico grande, só o valor (nome opcional).
 
-import { h, toast, sheet, fitText } from '../dom.js';
+import { h, toast, sheet, fitText, amountParts } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
-import { computeDailyBudget } from '../../core/budget.js';
+import { computeDailyBudget, computeTomorrowBudget, withDelta } from '../../core/budget.js';
 import { suggestRefill } from '../../core/refill.js';
 import { todayISO, addDays, formatDayMonth } from '../../core/dates.js';
 import { refillSheet } from './today.js';
 import { nameList, editIncome } from '../editors.js';
 
 const MAX_DIGITS = 9;
+let cameFrom = '#/hoje'; // tela de onde o lançamento foi aberto; fechar volta para ela
 
 const MODES = {
   spend: { label: 'Gasto', account: 'Sai de', placeholder: 'Nome do gasto (opcional)', list: 'nomes-gastos' },
   income: { label: 'Receita', account: 'Entra em', placeholder: 'Nome da receita (opcional)', list: 'nomes-receitas' },
 };
 
-function warnNegative(accountId) {
+function warnNegative(accountId, undo) {
   const s = store.getState();
   const acc = store.getAccount(accountId);
   if (!acc || acc.balance >= 0 || accountId !== s.settings.defaultAccountId) return;
@@ -34,22 +35,29 @@ function warnNegative(accountId) {
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn grow', onclick: close }, 'Agora não'),
       refill.amount > 0 && h('button', { class: 'btn warn grow', onclick: () => refillSheet({ refill }) }, `Resgatar ${formatBRLShort(refill.amount)}`)),
+    // esta folha tira da tela o aviso com "Desfazer": a ação continua aqui
+    h('button', { class: 'btn quiet block', onclick: () => { close(); undo(); } }, 'Desfazer o gasto'),
   ]), 350);
 }
 
 /** Limite do dia se uma receita de `cents` entrasse agora na conta. */
 function limitWithIncome(state, today, accountId, cents) {
-  const sim = { ...state, accounts: state.accounts.map((a) => (a.id === accountId ? { ...a, balance: a.balance + cents } : a)) };
-  return computeDailyBudget(sim, today).dailyBudget;
+  return computeDailyBudget(withDelta(state, accountId, cents), today).dailyBudget;
+}
+
+/** Limite de amanhã se um gasto de `cents` saísse agora da conta. */
+function tomorrowAfterSpend(state, today, accountId, cents) {
+  return computeTomorrowBudget(withDelta(state, accountId, -cents), today).dailyBudget;
 }
 
 export function renderSpend(ctx) {
   const state = ctx.state;
+  if (ctx.prevRoute && !['#/gasto', '#/receita', '#/setup'].includes(ctx.prevRoute)) cameFrom = ctx.prevRoute;
   let mode = ctx.mode === 'income' ? 'income' : 'spend';
   let text = ''; // o que foi digitado, ex.: "12,5"
   let accountId = state.settings.defaultAccountId;
 
-  const display = h('p', { class: 'amount-display', 'aria-live': 'polite', 'data-fit': true });
+  const display = h('p', { class: 'amount amount-display', 'aria-live': 'polite', 'data-fit': true });
   const hint = h('p', { class: 'amount-hint' });
   const desc = h('input', {
     type: 'text', maxlength: store.NAME_MAX, autocomplete: 'off',
@@ -70,7 +78,7 @@ export function renderSpend(ctx) {
   function update() {
     const v = cents();
     const m = MODES[mode];
-    display.textContent = formatBRL(v);
+    display.replaceChildren(...amountParts(formatBRL(v)));
     display.classList.toggle('empty', v === 0);
     display.classList.toggle('income', mode === 'income');
     confirmBtn.disabled = v <= 0;
@@ -86,11 +94,18 @@ export function renderSpend(ctx) {
         ? 'Entra no saldo agora e aumenta o limite do dia'
         : `Limite do dia passa para ${formatBRL(limitWithIncome(state, ctx.today, accountId, v))}`;
     } else {
-      const left = ctx.budget.remainingToday - v;
-      hint.textContent = v === 0
-        ? `Resta para hoje: ${formatBRL(ctx.budget.remainingToday)}`
-        : left >= 0 ? `Sobram ${formatBRL(left)} hoje` : `Passa ${formatBRL(-left)} do limite de hoje`;
-      hint.classList.toggle('neg', v > 0 && left < 0);
+      const b = ctx.budget;
+      const left = b.remainingToday - v; // do que está liberado agora
+      const full = b.dailyBudget - b.spentToday - v; // do limite, contando receitas a confirmar
+      const w = b.waiting;
+      hint.textContent = b.dailyBudget < 0
+        ? (v === 0 ? 'Sem folga hoje' : `Sem folga hoje. Amanhã fica em ${formatBRL(tomorrowAfterSpend(state, ctx.today, accountId, v))}`)
+        : v === 0
+        ? (b.remainingToday >= 0 ? `Resta para gastar hoje: ${formatBRL(b.remainingToday)}` : `Já passou ${formatBRL(-b.remainingToday)} do limite de hoje`)
+        : left >= 0 ? `Sobram ${formatBRL(left)} hoje`
+          : full >= 0 ? `Passa ${formatBRL(-left)} do liberado até confirmar ${w.length === 1 ? w[0].name : 'as receitas pendentes'}`
+            : `Passa ${formatBRL(-full)} do limite. Amanhã cai para ${formatBRL(tomorrowAfterSpend(state, ctx.today, accountId, v))}`;
+      hint.classList.toggle('neg', v > 0 && full < 0);
     }
     if (display.isConnected) fitText(display.parentElement);
   }
@@ -122,10 +137,9 @@ export function renderSpend(ctx) {
     }
     const t = store.addSpend(v, name, accountId);
     ctx.navigate('#/hoje', { replace: true });
-    toast(`Gasto de ${formatBRL(v)} lançado`, {
-      label: 'Desfazer', run: () => { store.deleteTransaction(t.id); toast('Gasto desfeito'); },
-    });
-    warnNegative(accountId);
+    const undo = () => { store.deleteTransaction(t.id); toast('Gasto desfeito'); };
+    toast(`Gasto de ${formatBRL(v)} lançado`, { label: 'Desfazer', run: undo });
+    warnNegative(accountId, undo);
   }
 
   /** Receita que vai cair em outro dia: agenda uma receita única, já preenchida. */
@@ -137,7 +151,7 @@ export function renderSpend(ctx) {
       },
       onSaved: (inc) => {
         ctx.navigate('#/hoje', { replace: true });
-        toast(`${inc.name}: agendada para ${formatDayMonth(inc.rule.date)}`);
+        toast(inc.rule.type === 'once' ? `${inc.name}: agendada para ${formatDayMonth(inc.rule.date)}` : `${inc.name}: receita salva`);
       },
     });
   }
@@ -187,7 +201,7 @@ export function renderSpend(ctx) {
   update();
   return h('div', { class: 'screen spend' },
     h('header', { class: 'topbar' },
-      h('button', { class: 'icon-btn', 'aria-label': 'Voltar', onclick: () => ctx.navigate('#/hoje', { replace: true }) }, icon('back', { size: 24 })),
+      h('button', { class: 'icon-btn', 'aria-label': 'Fechar', onclick: () => ctx.navigate(cameFrom, { replace: true }) }, icon('close', { size: 24 })),
       h('div', { class: 'segmented mode-toggle', role: 'group', 'aria-label': 'Tipo de lançamento' }, modeButtons),
       h('span')),
     h('div', { class: 'amount-area' }, display, hint),
