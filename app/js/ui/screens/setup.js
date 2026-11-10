@@ -58,10 +58,10 @@ function welcome() {
       h('img', { src: 'icons/icon-192.png', alt: '', width: 88, height: 88 }),
       h('h1', {}, 'Hoje'),
       h('p', { class: 'lead' }, 'Quanto você pode gastar hoje sem faltar dinheiro até o salário.')),
-    h('ul', { class: 'features card' },
+    h('section', { class: 'card' }, h('ul', { class: 'features' },
       feature('sun', 'Limite do dia', 'Recalculado todo dia com o saldo real.'),
       feature('transfer', 'Hora de resgatar', 'Avisa quando a conta precisa de reforço.'),
-      feature('wallet', 'Privado', 'Funciona offline. Backup só com criptografia.')),
+      feature('wallet', 'Privado', 'Funciona offline. Backup só com criptografia.'))),
   ];
 }
 
@@ -88,7 +88,7 @@ export function renderSetup(ctx) {
   return h('div', { class: 'screen setup' },
     step > 0 && h('div', { class: 'steps', 'aria-hidden': 'true' }, STEPS.slice(1).map((_, i) => h('span', { class: i < step ? 'on' : '' }))),
     step > 0 && h('p', { class: 'step-count' }, `Passo ${step} de ${STEPS.length - 1}`),
-    cur.title && h('header', { class: 'screen-head' }, h('h1', {}, cur.title), cur.lead && h('p', { class: 'sub' }, cur.lead)),
+    cur.title && h('header', { class: 'screen-head' }, h('div', { class: 'titles' }, h('h1', {}, cur.title), cur.lead && h('p', { class: 'sub' }, cur.lead))),
     cur.tips && h('div', { class: 'stack-sm' }, cur.tips.map(tip)),
     cur.render(state),
     step === 0

@@ -1,16 +1,17 @@
 // Lançar gasto ou receita: teclado numérico grande, só o valor (nome opcional).
 
-import { h, toast, sheet, fitText } from '../dom.js';
+import { h, toast, sheet, fitText, amountParts } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
-import { computeDailyBudget } from '../../core/budget.js';
+import { computeDailyBudget, computeTomorrowBudget } from '../../core/budget.js';
 import { suggestRefill } from '../../core/refill.js';
 import { todayISO, addDays, formatDayMonth } from '../../core/dates.js';
 import { refillSheet } from './today.js';
 import { nameList, editIncome } from '../editors.js';
 
 const MAX_DIGITS = 9;
+let cameFrom = '#/hoje'; // tela de onde o lançamento foi aberto; fechar volta para ela
 
 const MODES = {
   spend: { label: 'Gasto', account: 'Sai de', placeholder: 'Nome do gasto (opcional)', list: 'nomes-gastos' },
@@ -37,19 +38,29 @@ function warnNegative(accountId) {
   ]), 350);
 }
 
+/** O estado se `cents` entrassem agora na conta (negativo: saíssem). */
+const withDelta = (state, accountId, cents) => ({
+  ...state, accounts: state.accounts.map((a) => (a.id === accountId ? { ...a, balance: a.balance + cents } : a)),
+});
+
 /** Limite do dia se uma receita de `cents` entrasse agora na conta. */
 function limitWithIncome(state, today, accountId, cents) {
-  const sim = { ...state, accounts: state.accounts.map((a) => (a.id === accountId ? { ...a, balance: a.balance + cents } : a)) };
-  return computeDailyBudget(sim, today).dailyBudget;
+  return computeDailyBudget(withDelta(state, accountId, cents), today).dailyBudget;
+}
+
+/** Limite de amanhã se um gasto de `cents` saísse agora da conta. */
+function tomorrowAfterSpend(state, today, accountId, cents) {
+  return computeTomorrowBudget(withDelta(state, accountId, -cents), today).dailyBudget;
 }
 
 export function renderSpend(ctx) {
   const state = ctx.state;
+  if (ctx.prevRoute && !['#/gasto', '#/receita', '#/setup'].includes(ctx.prevRoute)) cameFrom = ctx.prevRoute;
   let mode = ctx.mode === 'income' ? 'income' : 'spend';
   let text = ''; // o que foi digitado, ex.: "12,5"
   let accountId = state.settings.defaultAccountId;
 
-  const display = h('p', { class: 'amount-display', 'aria-live': 'polite', 'data-fit': true });
+  const display = h('p', { class: 'amount amount-display', 'aria-live': 'polite', 'data-fit': true });
   const hint = h('p', { class: 'amount-hint' });
   const desc = h('input', {
     type: 'text', maxlength: store.NAME_MAX, autocomplete: 'off',
@@ -70,7 +81,7 @@ export function renderSpend(ctx) {
   function update() {
     const v = cents();
     const m = MODES[mode];
-    display.textContent = formatBRL(v);
+    display.replaceChildren(...amountParts(formatBRL(v)));
     display.classList.toggle('empty', v === 0);
     display.classList.toggle('income', mode === 'income');
     confirmBtn.disabled = v <= 0;
@@ -88,8 +99,9 @@ export function renderSpend(ctx) {
     } else {
       const left = ctx.budget.remainingToday - v;
       hint.textContent = v === 0
-        ? `Resta para hoje: ${formatBRL(ctx.budget.remainingToday)}`
-        : left >= 0 ? `Sobram ${formatBRL(left)} hoje` : `Passa ${formatBRL(-left)} do limite de hoje`;
+        ? (ctx.budget.remainingToday >= 0 ? `Resta para gastar hoje: ${formatBRL(ctx.budget.remainingToday)}` : `Já passou ${formatBRL(-ctx.budget.remainingToday)} do limite de hoje`)
+        : left >= 0 ? `Sobram ${formatBRL(left)} hoje`
+          : `Passa ${formatBRL(-left)} do limite. Amanhã cai para ${formatBRL(tomorrowAfterSpend(state, ctx.today, accountId, v))}`;
       hint.classList.toggle('neg', v > 0 && left < 0);
     }
     if (display.isConnected) fitText(display.parentElement);
@@ -187,7 +199,7 @@ export function renderSpend(ctx) {
   update();
   return h('div', { class: 'screen spend' },
     h('header', { class: 'topbar' },
-      h('button', { class: 'icon-btn', 'aria-label': 'Voltar', onclick: () => ctx.navigate('#/hoje', { replace: true }) }, icon('back', { size: 24 })),
+      h('button', { class: 'icon-btn', 'aria-label': 'Fechar', onclick: () => ctx.navigate(cameFrom, { replace: true }) }, icon('close', { size: 24 })),
       h('div', { class: 'segmented mode-toggle', role: 'group', 'aria-label': 'Tipo de lançamento' }, modeButtons),
       h('span')),
     h('div', { class: 'amount-area' }, display, hint),

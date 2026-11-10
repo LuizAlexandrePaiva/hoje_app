@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeDailyBudget, nextSalary } from '../app/js/core/budget.js';
+import { computeDailyBudget, computeTomorrowBudget, nextSalary } from '../app/js/core/budget.js';
 import { applyTransaction } from '../app/js/data/ledger.js';
 import { TODAY, scenario } from './fixtures.js';
 
@@ -136,7 +136,65 @@ test('projeção: arredondamento do orçamento não vira saldo negativo', async 
   const s = scenario();
   const b = computeDailyBudget(s, TODAY);
   const p = projectBalance(s, TODAY, b).points.find((x) => x.date === b.horizonEnd);
-  assert.equal(p.spending, 0); // 2.379 − 14 × 169,93 = −0,02 → 0
+  assert.equal(p.balance, 0); // 2.379 − 14 × 169,93 = −0,02 → 0
+});
+
+test('projeção: começa no saldo de agora e desce o limite de cada dia', async () => {
+  const { projectBalance } = await import('../app/js/core/projection.js');
+  const s = scenario();
+  spend(s, 4500);
+  const b = computeDailyBudget(s, TODAY);
+  const p = projectBalance(s, TODAY, b);
+  assert.equal(p.start, 237900 - 4500);
+  assert.equal(p.points[0].balance, 237900 - 16993); // fim de hoje: gasta o que ainda resta
+  assert.equal(p.points[1].balance, 237900 - 2 * 16993);
+  assert.equal(p.points.length, p.days);
+});
+
+test('projeção: a cada salário o limite é refeito e o saldo volta a zerar na véspera do seguinte', async () => {
+  const { projectBalance } = await import('../app/js/core/projection.js');
+  const s = scenario();
+  const p = projectBalance(s, TODAY, computeDailyBudget(s, TODAY));
+  const at = (d) => p.points.find((x) => x.date === d);
+  // 9/11 a 6/12: (−0,02 + 2.500 + 1.350 + 2.900 − 1.600 − 180) ÷ 28 dias = R$ 177,50
+  const payday = at('2026-11-09');
+  assert.equal(payday.dayEvents[0].name, 'Salário');
+  assert.equal(payday.balance, -2 + 250000 - 17750);
+  assert.equal(at('2026-12-06').balance, 0); // véspera do salário de dezembro
+  assert.ok(at('2026-12-07').balance > 200000); // o salário de dezembro reabre o ciclo
+  assert.ok(p.points.every((x) => x.balance >= 0)); // seguir o limite nunca deixa o saldo negativo
+});
+
+test('projeção: com o limite de hoje estourado, a linha não sobe e segue o limite de amanhã', async () => {
+  const { projectBalance } = await import('../app/js/core/projection.js');
+  const s = scenario();
+  spend(s, 30000); // passou R$ 130,07 do limite
+  const b = computeDailyBudget(s, TODAY);
+  const t = computeTomorrowBudget(s, TODAY);
+  const p = projectBalance(s, TODAY, b, t);
+  assert.equal(p.points[0].balance, p.start); // hoje não há mais o que gastar
+  assert.equal(p.points[1].balance, p.start - t.dailyBudget);
+  // na véspera do salário sobra só o resto do arredondamento (menos de 1 centavo por dia)
+  const eve = p.points.find((x) => x.date === b.horizonEnd).balance;
+  assert.ok(eve >= 0 && eve < 13);
+});
+
+test('amanhã: o que sobra hoje é repartido; o que passa do limite é descontado', () => {
+  // nada gasto: 2.379 ÷ 13 dias restantes
+  assert.equal(computeTomorrowBudget(scenario(), TODAY).dailyBudget, 18300);
+  // gastou exatamente o limite: amanhã o limite é o mesmo
+  const exato = scenario();
+  spend(exato, 16993);
+  assert.equal(computeTomorrowBudget(exato, TODAY).dailyBudget, 16993);
+  // gastou menos: amanhã sobe
+  const menos = scenario();
+  spend(menos, 4500);
+  assert.equal(computeTomorrowBudget(menos, TODAY).dailyBudget, Math.round((237900 - 4500) / 13));
+  // gastou mais: amanhã cai
+  const mais = scenario();
+  spend(mais, 30000);
+  assert.equal(computeTomorrowBudget(mais, TODAY).dailyBudget, Math.round((237900 - 30000) / 13));
+  assert.ok(computeTomorrowBudget(mais, TODAY).dailyBudget < 16993);
 });
 
 test('salário veio antes: confirmar antecipado leva o horizonte ao mês seguinte sem contar em dobro', () => {
@@ -175,4 +233,17 @@ test('receita única agendada no meio do período entra a partir da data dela', 
   // agendada para depois do salário não muda o limite de agora
   s.incomes.at(-1).rule.date = '2026-11-20';
   assert.equal(computeDailyBudget(s, TODAY).dailyBudget, 16993);
+});
+
+test('untilLimit: a conta que explica o limite fecha com o próprio limite', () => {
+  const b = computeDailyBudget(scenario(), TODAY);
+  assert.deepEqual(b.untilLimit, { days: 14, incomes: 0, outflows: 0, available: 237900 });
+  assert.equal(Math.round(b.untilLimit.available / b.untilLimit.days), b.dailyBudget);
+
+  // no dia do salário já entram receitas e despesas no caminho até o dia mais apertado
+  const later = computeDailyBudget(scenario(), '2026-11-09');
+  const u = later.untilLimit;
+  assert.equal(u.available, later.spendableStart + u.incomes - u.outflows);
+  assert.equal(Math.round(u.available / u.days), later.dailyBudget);
+  assert.ok(u.incomes > 0);
 });

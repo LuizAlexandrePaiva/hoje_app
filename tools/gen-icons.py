@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-BG = (14, 16, 20, 255)
+BG = (11, 12, 15, 255)
 COIN = (61, 220, 151, 255)       # verde de destaque do app
 COIN_DARK = (34, 160, 107, 255)  # borda / lateral da moeda
 INK = (6, 42, 27, 255)           # texto sobre o verde

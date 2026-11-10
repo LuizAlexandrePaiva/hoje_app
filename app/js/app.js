@@ -1,6 +1,6 @@
 import * as store from './data/store.js';
 import { todayISO } from './core/dates.js';
-import { computeDailyBudget } from './core/budget.js';
+import { computeDailyBudget, computeTomorrowBudget } from './core/budget.js';
 import { suggestRefill, suggestSurplus } from './core/refill.js';
 import { afterSheetClosed, toast, fitText } from './ui/dom.js';
 import * as sync from './data/sync.js';
@@ -43,6 +43,7 @@ function buildContext(state) {
   const ctx = { state, today, navigate, prevRoute: main.dataset.route };
   if (state.setupDone) {
     ctx.budget = computeDailyBudget(state, today);
+    ctx.tomorrow = computeTomorrowBudget(state, today);
     ctx.refill = suggestRefill(state, today, ctx.budget);
     ctx.surplus = suggestSurplus(state, today, ctx.budget);
   }
@@ -81,7 +82,7 @@ function checkDay() {
   if (todayISO() !== currentDay) render();
 }
 
-for (const a of tabbar.querySelectorAll('a[data-icon]')) a.insertAdjacentHTML('afterbegin', iconSVG(a.dataset.icon, 24));
+for (const a of tabbar.querySelectorAll('a[data-icon]')) a.insertAdjacentHTML('afterbegin', iconSVG(a.dataset.icon, a.classList.contains('tab-add') ? 28 : 24));
 
 store.load();
 store.subscribe(render);

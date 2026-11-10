@@ -111,7 +111,9 @@ function dataCard() {
 export function renderSettings(ctx) {
   const { state } = ctx;
   return h('div', { class: 'screen settings' },
-    h('header', { class: 'screen-head' }, h('h1', {}, 'Ajustes')),
+    h('header', { class: 'screen-head' },
+      h('button', { class: 'icon-btn', 'aria-label': 'Voltar para Hoje', onclick: () => ctx.navigate('#/hoje') }, icon('back', { size: 24 })),
+      h('div', { class: 'titles' }, h('h1', {}, 'Ajustes'))),
     h('h2', { class: 'section-label' }, 'Receitas'),
     incomesList(state, null),
     h('h2', { class: 'section-label' }, 'Despesas fixas'),

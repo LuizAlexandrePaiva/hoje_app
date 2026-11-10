@@ -1,7 +1,7 @@
 // Formulários (em folha modal) e listas editáveis de contas, receitas,
 // despesas fixas, metas e aportes. Usados no assistente inicial e em Ajustes.
 
-import { h, sheet, toast, confirmDialog, afterSheetClosed } from './dom.js';
+import { h, sheet, toast, confirmDialog, afterSheetClosed, amount as moneyText } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
 import { formatBRL, formatBRLShort, parseBRL, toInput } from '../core/money.js';
@@ -415,7 +415,7 @@ export function eventSheet(event) {
   sheet(event.name, () => [
     h('div', { class: 'stat' },
       h('span', { class: 'stat-label' }, `Previsto para ${formatDayMonth(event.date, ref)}${moved ? `, antes ${formatDayMonth(event.originalDate, ref)}` : ''}`),
-      h('span', { class: `stat-value ${event.kind === 'income' ? 'pos' : ''}`, style: 'font-size:1.75rem', 'data-fit': true }, formatBRL(event.amount))),
+      moneyText(formatBRL(event.amount), `lg ${event.kind === 'income' ? 'pos' : ''}`, { 'data-fit': true })),
     h('button', { class: 'btn primary block', onclick: () => confirmOccurrenceSheet(event) }, cfg.early),
     h('button', { class: 'btn block', onclick: () => moveSheet(event) }, 'Mudar a data'),
   ]);
@@ -519,7 +519,7 @@ export function incomesList(state, title = 'Receitas') {
   const visible = state.incomes.filter((i) => !(i.rule?.type === 'once' && state.settled[`income:${i.id}:unica`]));
   return listCard(title,
     visible.map((i) => listItem(i.name, withAccount(state, describeRule(i.rule), i.accountId),
-      formatBRLShort(i.amount), () => editIncome(i), i.isSalary && h('span', { class: 'badge pos' }, 'Salário'))),
+      formatBRLShort(i.amount), () => editIncome(i), i.isSalary && h('span', { class: 'badge' }, 'Salário'))),
     'Nenhuma receita ainda.', () => editIncome(), 'Nova receita');
 }
 
@@ -588,7 +588,7 @@ export function transactionSheet(t) {
   },
   h('div', { class: 'stat' },
     h('span', { class: 'stat-label' }, `${when}, ${where}`),
-    h('span', { class: 'stat-value', style: 'font-size:1.75rem', 'data-fit': true }, formatBRL(Math.abs(t.amount)))),
+    moneyText(formatBRL(Math.abs(t.amount)), `lg ${t.type === 'income' ? 'pos' : ''}`, { 'data-fit': true })),
   field('Nome', name),
   suggest && nameList(listId, t.type),
   actions(async () => {

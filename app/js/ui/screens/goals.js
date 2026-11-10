@@ -1,4 +1,6 @@
-import { h } from '../dom.js';
+// Metas: quanto já foi guardado, quanto falta e os aportes planejados.
+
+import { h, amount } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
@@ -12,40 +14,43 @@ function goalCard(ctx, g) {
   const acc = store.getAccount(g.accountId);
   const saved = acc?.balance ?? 0;
   const missing = Math.max(0, g.target - saved);
-  const pct = g.target > 0 ? Math.min(100, (saved / g.target) * 100) : 0;
+  const pct = g.target > 0 ? Math.min(100, Math.max(0, (saved / g.target) * 100)) : 0;
   const days = diffDays(today, g.deadline);
   const contribs = state.contributions.filter((c) => c.goalId === g.id).sort((a, b) => (a.date < b.date ? -1 : 1));
   const planned = contribs.filter((c) => !state.settled[`contribution:${c.id}`]).reduce((s, c) => s + c.amount, 0);
   const gapAfter = missing - planned;
   const shared = state.goals.filter((x) => x.accountId === g.accountId).length > 1;
   const pendingKeys = new Set(pendingConfirmations(state, today).map((e) => e.key));
+  const reached = missing === 0;
+  const late = !reached && days < 0;
 
-  const status = missing === 0 ? h('span', { class: 'badge pos' }, 'Atingida')
-    : days < 0 ? h('span', { class: 'badge neg' }, 'Prazo vencido')
-      : h('span', { class: 'badge' }, days === 0 ? 'Hoje' : `${days} ${days === 1 ? 'dia' : 'dias'}`);
+  // estado em uma etiqueta: verde só quando atingida, vermelho só com prazo vencido
+  const status = reached ? h('span', { class: 'badge pos' }, 'Atingida')
+    : late ? h('span', { class: 'badge neg' }, 'Prazo vencido')
+      : h('span', { class: 'badge' }, days === 0 ? 'Vence hoje' : days === 1 ? '1 dia restante' : `${days} dias restantes`);
 
-  const plan = missing === 0 ? null
+  const plan = reached ? null
     : planned > 0
-      ? (gapAfter > 0 ? `Com os aportes planejados, ainda faltam ${formatBRL(gapAfter)}.` : null)
+      ? (gapAfter > 0 ? `Com os aportes planejados, ainda faltam ${formatBRL(gapAfter)}.` : 'Os aportes planejados fecham a meta.')
       : days > 0 ? `Seriam ${formatBRL(Math.ceil(missing / Math.max(1, Math.ceil(days / 30))))} por mês até lá.` : null;
 
-  return h('section', { class: 'card' },
+  return h('section', { class: 'card goal' },
     h('div', { class: 'card-head' },
       h('div', { class: 'li-main' },
         h('h2', { class: 'card-title' }, g.name),
         h('span', { class: 'li-sub' }, `Até ${formatDayMonth(g.deadline, year)}`)),
       h('button', { class: 'icon-btn', 'aria-label': `Editar meta ${g.name}`, onclick: () => editGoal(g) }, icon('edit', { size: 20 }))),
-    h('div', { class: 'row between', style: 'align-items:baseline' },
-      h('span', { class: 'stat-value', 'data-fit': true }, formatBRL(saved)),
-      h('span', { class: 'muted small' }, `de ${formatBRLShort(g.target)}`)),
-    h('div', { class: 'meter lg', role: 'progressbar', 'aria-label': 'Progresso da meta', 'aria-valuenow': Math.round(pct), 'aria-valuemin': 0, 'aria-valuemax': 100 },
+    h('div', { class: 'row between baseline gap' },
+      amount(formatBRL(saved), `md ${reached ? 'pos' : ''}`, { 'data-fit': true }),
+      h('span', { class: 'muted small', style: 'white-space:nowrap' }, `de ${formatBRLShort(g.target)}`)),
+    h('div', { class: `meter ${reached ? '' : 'neutral'}`, role: 'progressbar', 'aria-label': 'Progresso da meta', 'aria-valuenow': Math.round(pct), 'aria-valuemin': 0, 'aria-valuemax': 100 },
       h('span', { style: `width:${pct}%` })),
-    h('div', { class: 'row between' },
-      h('span', { class: 'small' }, missing > 0 ? `Faltam ${formatBRL(missing)}` : 'Meta atingida'),
+    h('div', { class: 'row between gap' },
+      h('span', { class: 'small' }, reached ? 'Meta atingida' : `Faltam ${formatBRL(missing)}`),
       status),
     plan && h('p', { class: 'small muted' }, plan),
-    shared && h('p', { class: 'caption' }, `${acc?.name} é usada por mais de uma meta; o progresso mostra o saldo total.`),
-    h('div', { class: 'card flush', style: 'background:var(--surface-2);padding:0 14px' },
+    shared && h('p', { class: 'caption' }, `${acc?.name} é usada por mais de uma meta. O progresso mostra o saldo total.`),
+    h('div', { class: 'card inset' },
       contribs.length > 0 && h('ul', { class: 'list' }, contribs.map((c) => {
         const done = state.settled[`contribution:${c.id}`];
         const st = done ? h('span', { class: 'badge pos' }, 'Feito')
@@ -62,11 +67,11 @@ function goalCard(ctx, g) {
 export function renderGoals(ctx) {
   const goals = [...ctx.state.goals].sort((a, b) => (a.deadline < b.deadline ? -1 : 1));
   return h('div', { class: 'screen goals' },
-    h('header', { class: 'screen-head' }, h('h1', {}, 'Metas')),
+    h('header', { class: 'screen-head' }, h('div', { class: 'titles' }, h('h1', {}, 'Metas'))),
     goals.length
       ? goals.map((g) => goalCard(ctx, g))
       : h('section', { class: 'card' },
         h('p', { class: 'card-title' }, 'Nenhuma meta ainda'),
-        h('p', { class: 'small muted' }, 'Uma meta usa uma conta “de meta”. Os aportes saem de uma conta de gasto e já descontam do orçamento.')),
+        h('p', { class: 'small muted' }, 'Uma meta acompanha o saldo de uma conta “de meta”. Os aportes saem de uma conta de gasto e já descontam do limite do dia.')),
     h('section', { class: 'card flush' }, addButton('Nova meta', () => editGoal())));
 }

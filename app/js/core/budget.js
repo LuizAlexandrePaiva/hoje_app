@@ -56,19 +56,24 @@ export function computeDailyBudget(state, today) {
 
   const events = openEvents(state, today, horizonEnd);
   let cumulative = 0;
+  let incomes = 0; // entradas previstas nas contas de gasto até o dia k
   let i = 0;
   let best = Infinity;
   let limitingDay = today;
+  let untilLimit = { days: 1, incomes: 0, outflows: 0 };
   for (let k = 0; k < days; k++) {
     const day = addDays(today, k);
     while (i < events.length && events[i].effectiveDate <= day) {
-      cumulative += flowInto(events[i], ids);
+      const flow = flowInto(events[i], ids);
+      cumulative += flow;
+      if (flow > 0) incomes += flow;
       i++;
     }
     const perDay = (spendableStart + cumulative) / (k + 1);
     if (perDay < best) {
       best = perDay;
       limitingDay = day;
+      untilLimit = { days: k + 1, incomes, outflows: incomes - cumulative };
     }
   }
 
@@ -83,6 +88,17 @@ export function computeDailyBudget(state, today) {
     horizonEnd,
     days,
     limitingDay,
+    // a conta que define o limite: (saldo + entradas − saídas) ÷ dias, até o dia mais apertado
+    untilLimit: { ...untilLimit, available: spendableStart + untilLimit.incomes - untilLimit.outflows },
     nextSalary: salary,
   };
+}
+
+/**
+ * Limite de amanhã se nada mais for gasto hoje: a mesma conta, um dia à
+ * frente, com o saldo de agora. Sobe quando sobra limite hoje e cai quando
+ * o gasto de hoje passa do limite.
+ */
+export function computeTomorrowBudget(state, today) {
+  return computeDailyBudget(state, addDays(today, 1));
 }

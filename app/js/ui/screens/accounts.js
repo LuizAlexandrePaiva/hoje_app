@@ -1,6 +1,6 @@
 // Contas: onde está o dinheiro (contas e seus papéis) e o que aconteceu (movimentações).
 
-import { h, sheet, toast } from '../dom.js';
+import { h, sheet, toast, amount } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { formatBRL } from '../../core/money.js';
@@ -128,7 +128,7 @@ function accountSheet(ctx, a) {
   sheet(a.name, () => [
     h('div', { class: 'stat' },
       h('span', { class: 'stat-label' }, 'Saldo'),
-      h('span', { class: `stat-value ${a.balance < 0 ? 'neg' : ''}`, style: 'font-size:2rem', 'data-fit': true }, formatBRL(a.balance))),
+      amount(formatBRL(a.balance), `lg ${a.balance < 0 ? 'neg' : ''}`, { 'data-fit': true })),
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn grow', onclick: () => adjustSheet(a) }, icon('edit', { size: 18 }), 'Ajustar saldo'),
       h('button', {
@@ -141,7 +141,7 @@ function accountSheet(ctx, a) {
     h('div', { class: 'field' },
       h('span', { class: 'field-label' }, 'Últimas movimentações'),
       recent.length
-        ? h('ul', { class: 'list' }, recent.map((t) => txRow(t, a.id)))
+        ? h('div', { class: 'card inset' }, h('ul', { class: 'list' }, recent.map((t) => txRow(t, a.id))))
         : h('p', { class: 'empty' }, 'Nenhuma movimentação ainda.')),
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn quiet grow', onclick: () => editAccount(a) }, 'Editar nome'),
@@ -161,12 +161,11 @@ export function renderAccounts(ctx) {
   const total = spending.reduce((s, a) => s + a.balance, 0);
   const outside = goal.reduce((s, a) => s + a.balance, 0);
   return h('div', { class: 'screen accounts' },
-    h('header', { class: 'screen-head' }, h('h1', {}, 'Contas')),
-    h('section', { class: 'card' },
-      h('div', { class: 'stat' },
-        h('span', { class: 'stat-label' }, 'Nas contas de gasto'),
-        h('span', { class: `stat-value ${total < 0 ? 'neg' : ''}`, style: 'font-size:2rem', 'data-fit': true }, formatBRL(total)),
-        goal.length > 0 && h('span', { class: 'li-sub' }, `Fora do orçamento: ${formatBRL(outside)}`))),
+    h('header', { class: 'screen-head' }, h('div', { class: 'titles' }, h('h1', {}, 'Contas'))),
+    h('section', { class: 'hero' },
+      h('p', { class: 'hero-label' }, 'Nas contas de gasto'),
+      amount(formatBRL(total), `summary-value lg ${total < 0 ? 'neg' : ''}`, { 'data-fit': true }),
+      goal.length > 0 && h('p', { class: 'hero-note' }, `Fora do orçamento: ${formatBRL(outside)}`)),
     h('h2', { class: 'section-label' }, 'Contas de gasto'),
     h('section', { class: 'card flush' }, h('ul', { class: 'list' }, spending.map((a) => accountRow(ctx, a)))),
     goal.length > 0 && h('h2', { class: 'section-label' }, 'Fora do orçamento'),

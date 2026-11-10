@@ -1,6 +1,7 @@
-// Linha do tempo: gráfico SVG próprio do saldo projetado + lista de eventos.
+// Linha do tempo: uma linha com o saldo previsto e a lista do que está por vir.
 
-import { h, svg } from '../dom.js';
+import { h, svg, amountParts } from '../dom.js';
+import { icon } from '../icons.js';
 import { formatBRL, formatBRLShort } from '../../core/money.js';
 import { formatShort, formatLong, relative, addDays } from '../../core/dates.js';
 import { projectBalance } from '../../core/projection.js';
@@ -10,124 +11,131 @@ import * as store from '../../data/store.js';
 import { eventSheet, editIncome, addButton } from '../editors.js';
 
 const W = 360;
-const H = 200;
-const PAD = { l: 8, r: 8, t: 22, b: 24 };
+const H = 176;
+const PAD = { l: 8, r: 8, t: 14, b: 24 };
 
-function niceTicks(min, max, count = 4) {
-  const span = max - min || 1;
-  const raw = span / count;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
-  const ticks = [];
-  for (let v = Math.ceil(min / step) * step; v <= max; v += step) ticks.push(v);
-  return ticks;
+/** Curva suave que nunca passa dos pontos (interpolação cúbica monótona). */
+function smoothPath(p) {
+  const n = p.length;
+  if (n < 3) return p.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join('');
+  const slope = (i) => {
+    const h0 = p[i][0] - p[i - 1][0];
+    const h1 = p[i + 1][0] - p[i][0];
+    const s0 = (p[i][1] - p[i - 1][1]) / h0;
+    const s1 = (p[i + 1][1] - p[i][1]) / h1;
+    const mid = (s0 * h1 + s1 * h0) / (h0 + h1);
+    return (Math.sign(s0) + Math.sign(s1)) * Math.min(Math.abs(s0), Math.abs(s1), 0.5 * Math.abs(mid)) || 0;
+  };
+  const t = new Array(n);
+  for (let i = 1; i < n - 1; i++) t[i] = slope(i);
+  const edge = (a, b, tb) => (3 * (p[b][1] - p[a][1]) / (p[b][0] - p[a][0]) - tb) / 2;
+  t[0] = edge(0, 1, t[1]);
+  t[n - 1] = edge(n - 2, n - 1, t[n - 2]);
+  let d = `M${p[0][0].toFixed(1)},${p[0][1].toFixed(1)}`;
+  for (let i = 1; i < n; i++) {
+    const dx = (p[i][0] - p[i - 1][0]) / 3;
+    d += `C${(p[i - 1][0] + dx).toFixed(1)},${(p[i - 1][1] + dx * t[i - 1]).toFixed(1)} ${(p[i][0] - dx).toFixed(1)},${(p[i][1] - dx * t[i]).toFixed(1)} ${p[i][0].toFixed(1)},${p[i][1].toFixed(1)}`;
+  }
+  return d;
 }
 
-function compactBRL(cents) {
-  const v = cents / 100 + 0; // + 0 transforma -0 em 0
-  if (Math.abs(v) >= 1000) return `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
-  return v.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-}
+const short = (s, max = 16) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 
 function chart(ctx, proj) {
-  const pts = proj.points;
   const ids = spendingAccountIds(ctx.state);
-  const values = pts.flatMap((p) => [p.events, p.spending]);
-  let min = Math.min(0, ...values);
-  let max = Math.max(...values);
-  const padY = (max - min) * 0.08 || 1000;
-  min -= min < 0 ? padY : 0;
-  max += padY;
+  // o primeiro ponto é o saldo de agora; os demais, o saldo ao fim de cada dia
+  const pts = [{ date: ctx.today, value: proj.start, now: true, events: [] },
+    ...proj.points.map((p) => ({ date: p.date, value: p.balance, events: p.dayEvents }))];
+  const values = pts.map((p) => p.value);
+  let lo = Math.min(0, ...values);
+  let hi = Math.max(...values, lo + 100);
+  const span = hi - lo;
+  hi += span * 0.06;
+  if (lo < 0) lo -= span * 0.06;
   const iw = W - PAD.l - PAD.r;
   const ih = H - PAD.t - PAD.b;
-  const x = (i) => PAD.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
-  const y = (v) => PAD.t + ih - ((v - min) / (max - min)) * ih;
-  const path = (key) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
+  const x = (i) => PAD.l + (i / (pts.length - 1)) * iw;
+  const y = (v) => PAD.t + ih - ((v - lo) / (hi - lo)) * ih;
+  const y0 = y(0);
+  const zero = Math.min(1, Math.max(0, y0 / H));
+  const line = smoothPath(pts.map((p, i) => [x(i), y(p.value)]));
+  const stop = (offset, color, opacity = 1) => svg('stop', { offset, style: `stop-color:var(${color});stop-opacity:${opacity}` });
+  const gradient = (id, top, base) => svg('linearGradient', { id, gradientUnits: 'userSpaceOnUse', x1: 0, y1: 0, x2: 0, y2: H },
+    stop(0, '--pos', top), stop(zero, '--pos', base), stop(zero, '--neg', base), stop(1, '--neg', top));
 
-  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': 'Saldo projetado das contas de gasto' });
+  const lowest = pts.reduce((a, b) => (b.value < a.value ? b : a));
+  const root = svg('svg', {
+    viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', tabindex: 0,
+    'aria-label': `Saldo previsto das contas de gasto: ${formatBRL(proj.start)} agora, ${formatBRL(pts[pts.length - 1].value)} em ${formatShort(proj.end)}. Menor saldo: ${formatBRL(lowest.value)} em ${formatShort(lowest.date)}.`,
+  });
+  root.append(svg('defs', {}, gradient('tl-line', 1, 1), gradient('tl-area', 0.3, 0)));
+  // verde acima de zero, vermelho abaixo: a cor da linha é o estado do saldo
+  root.append(svg('path', { d: `${line}L${x(pts.length - 1).toFixed(1)},${y0.toFixed(1)}L${x(0).toFixed(1)},${y0.toFixed(1)}Z`, class: 'area', fill: 'url(#tl-area)' }));
+  root.append(svg('line', { x1: PAD.l, x2: W - PAD.r, y1: y0, y2: y0, class: 'base' }));
+  root.append(svg('path', { d: line, class: 'line', stroke: 'url(#tl-line)' }));
 
-  // grade recessiva + rótulos do eixo y
-  for (const t of niceTicks(min, max)) {
-    root.append(svg('line', { x1: PAD.l, x2: W - PAD.r, y1: y(t), y2: y(t), class: t === 0 ? 'zero' : 'grid' }));
-    root.append(svg('text', { x: PAD.l + 2, y: y(t) - 4, class: 'axis' }, compactBRL(t)));
-  }
-
-  // marcador do próximo salário
-  const salIdx = ctx.budget.nextSalary ? pts.findIndex((p) => p.date === ctx.budget.nextSalary.date) : -1;
-  if (salIdx >= 0) {
-    root.append(svg('line', { x1: x(salIdx), x2: x(salIdx), y1: PAD.t - 4, y2: PAD.t + ih, class: 'salary-line' }));
-    root.append(svg('text', { x: x(salIdx), y: PAD.t - 8, class: 'axis strong', 'text-anchor': 'middle' }, ctx.budget.nextSalary.name));
-  }
-
-  root.append(svg('path', { d: path('events'), class: 'line s1' }));
-  root.append(svg('path', { d: path('spending'), class: 'line s2' }));
-
-  // dias de recebimento (▲ acima da linha) e de pagamento (▼ abaixo)
+  // um ponto em cada dia com receita (verde) ou pagamento (cinza)
   pts.forEach((p, i) => {
-    const flows = p.dayEvents.map((e) => flowInto(e, ids));
-    const cx = x(i);
-    const cy = y(p.events);
-    if (flows.some((f) => f > 0)) root.append(svg('path', { d: `M${cx - 5},${cy - 6}L${cx + 5},${cy - 6}L${cx},${cy - 14}Z`, class: 'mk in' }));
-    if (flows.some((f) => f < 0)) root.append(svg('path', { d: `M${cx - 5},${cy + 6}L${cx + 5},${cy + 6}L${cx},${cy + 14}Z`, class: 'mk out' }));
+    const net = p.events.reduce((s, e) => s + flowInto(e, ids), 0);
+    if (net) root.append(svg('circle', { cx: x(i), cy: y(p.value), r: 3.5, class: `mk ${net > 0 ? 'in' : 'out'}` }));
   });
 
-  // eixo x: hoje, salário e fim
-  const labels = new Map([[0, 'hoje'], [pts.length - 1, formatShort(pts[pts.length - 1].date)]]);
-  if (salIdx > 0 && salIdx < pts.length - 6) labels.set(salIdx, formatShort(pts[salIdx].date));
-  for (const [i, t] of labels) {
-    root.append(svg('text', {
-      x: x(i), y: H - 6, class: 'axis',
-      'text-anchor': i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle',
-    }, t));
+  // âncoras de tempo: hoje, o próximo salário e o fim
+  const last = pts.length - 1;
+  root.append(svg('text', { x: x(0), y: H - 4, class: 'axis', 'text-anchor': 'start' }, 'Hoje'));
+  root.append(svg('text', { x: x(last), y: H - 4, class: 'axis', 'text-anchor': 'end' }, formatShort(pts[last].date)));
+  const sal = ctx.budget.nextSalary;
+  const salIdx = sal ? pts.findIndex((p) => !p.now && p.date === sal.date) : -1;
+  if (salIdx > 0 && x(salIdx) > 70 && x(salIdx) < W - 80) {
+    root.append(svg('text', { x: x(salIdx), y: H - 4, class: 'axis', 'text-anchor': 'middle' }, short(sal.name)));
   }
 
-  // seleção: linha vertical + pontos; os valores aparecem no painel acima
-  const cross = svg('line', { y1: PAD.t, y2: PAD.t + ih, class: 'cross' });
-  const dot1 = svg('circle', { r: 4.5, class: 'dot s1' });
-  const dot2 = svg('circle', { r: 4.5, class: 'dot s2' });
-  root.append(cross, dot1, dot2);
+  // seleção: o dedo escolhe o dia; o valor aparece grande, acima do gráfico
+  const cross = svg('line', { y1: PAD.t - 6, y2: y0, class: 'cross' });
+  const dot = svg('circle', { r: 5.5, class: 'dot' });
+  root.append(cross, dot);
 
-  const rDate = h('p', { class: 'readout-date' });
-  const rRel = h('span', { class: 'muted small' });
-  const rV1 = h('span', { class: 'v' });
-  const rV2 = h('span', { class: 'v' });
+  const rDate = h('span', { class: 'readout-date' });
+  const rRel = h('span', {});
+  const rValue = h('p', { class: 'amount lg', 'data-fit': true });
   const rEvents = h('p', { class: 'readout-events' });
   const readout = h('div', { class: 'readout', 'aria-live': 'polite' },
-    h('div', { class: 'row between' }, rDate, rRel),
-    h('div', { class: 'readout-rows' },
-      h('span', { class: 'k' }, h('i', { class: 'sw s1' }), 'Sem gastos do dia'), rV1,
-      h('span', { class: 'k' }, h('i', { class: 'sw s2' }), 'Gastando o limite'), rV2),
-    rEvents);
+    h('p', { class: 'readout-top' }, rDate, rRel), rValue, rEvents);
 
+  let current = 0;
+  let touched = false;
   const select = (i) => {
-    const p = pts[i];
-    for (const el of [cross]) { el.setAttribute('x1', x(i)); el.setAttribute('x2', x(i)); }
-    dot1.setAttribute('cx', x(i)); dot1.setAttribute('cy', y(p.events));
-    dot2.setAttribute('cx', x(i)); dot2.setAttribute('cy', y(p.spending));
-    rDate.textContent = formatLong(p.date);
-    rRel.textContent = relative(ctx.today, p.date);
-    rV1.textContent = formatBRL(p.events);
-    rV2.textContent = formatBRL(p.spending);
-    rV2.classList.toggle('neg', p.spending < 0);
-    rEvents.textContent = p.dayEvents.map((e) => `${e.kind === 'income' ? '▲' : '▼'} ${e.name} ${formatBRLShort(e.amount)}`).join('    ');
+    current = Math.max(0, Math.min(last, i));
+    const p = pts[current];
+    cross.setAttribute('x1', x(current)); cross.setAttribute('x2', x(current));
+    dot.setAttribute('cx', x(current)); dot.setAttribute('cy', y(p.value));
+    dot.classList.toggle('neg', p.value < 0);
+    rDate.textContent = p.now ? 'Agora' : current === 1 ? 'Hoje, fim do dia' : formatLong(p.date);
+    rRel.textContent = current > 1 ? relative(ctx.today, p.date) : '';
+    rValue.replaceChildren(...amountParts(formatBRL(p.value)));
+    rValue.classList.toggle('neg', p.value < 0);
+    rEvents.textContent = p.events.length
+      ? p.events.map((e) => `${flowInto(e, ids) >= 0 && e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)} ${e.name}`).join('   ')
+      : touched ? '' : 'Toque no gráfico para ver cada dia';
   };
   const pick = (clientX) => {
     const r = root.getBoundingClientRect();
     const sx = ((clientX - r.left) / r.width) * W;
-    select(Math.max(0, Math.min(pts.length - 1, Math.round(((sx - PAD.l) / iw) * (pts.length - 1)))));
+    touched = true;
+    select(Math.round(((sx - PAD.l) / iw) * last));
   };
-  root.addEventListener('pointermove', (e) => pick(e.clientX));
-  root.addEventListener('pointerdown', (e) => pick(e.clientX));
-  // começa mostrando a véspera do salário (o ponto mais apertado do período)
-  select(Math.max(0, pts.findIndex((p) => p.date === ctx.budget.horizonEnd)));
+  // preventDefault: o toque escolhe o dia sem levar o foco (o anel de foco fica para o teclado)
+  root.addEventListener('pointerdown', (e) => { e.preventDefault(); pick(e.clientX); });
+  root.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons || e.pressure > 0) pick(e.clientX); });
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    touched = true;
+    select(current + (e.key === 'ArrowRight' ? 1 : -1));
+  });
+  select(0);
 
   return { readout, chart: h('div', { class: 'chart-wrap' }, root) };
-}
-
-function legend() {
-  return h('div', { class: 'legend' },
-    h('span', {}, h('i', { class: 'tri in' }, '▲'), 'Recebimento'),
-    h('span', {}, h('i', { class: 'tri out' }, '▼'), 'Pagamento'));
 }
 
 function eventList(ctx, proj) {
@@ -139,7 +147,7 @@ function eventList(ctx, proj) {
   if (!groups.size) return h('p', { class: 'empty' }, 'Nada previsto para o período.');
   const def = ctx.state.settings.defaultAccountId;
   const accName = (id) => store.getAccount(id)?.name ?? 'conta excluída';
-  // conta só aparece quando não é a padrão; atraso sempre aparece
+  // conta só aparece quando não é a dos gastos do dia; atraso sempre aparece
   const sub = (e) => {
     if (e.overdue) return `Atrasado, previsto para ${formatShort(e.date)}`;
     if (e.originalDate && e.date !== e.originalDate) return `Data mudada, era ${formatShort(e.originalDate)}`;
@@ -147,25 +155,23 @@ function eventList(ctx, proj) {
     return e.kind === 'income' ? `Entra em ${accName(e.accountId)}` : `Sai de ${accName(e.accountId)}`;
   };
   return h('div', {}, [...groups].map(([date, evs]) => h('div', { class: 'day-group' },
-    h('div', { class: 'day-head' }, h('strong', {}, formatLong(date)), h('span', { class: 'muted' }, relative(ctx.today, date))),
-    evs.map((e) => h('button', { class: 'ev', onclick: () => eventSheet(e) },
-      h('span', { class: `ev-dot ${e.kind === 'income' ? 'in' : 'out'}` }),
-      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: 'li-sub' }, sub(e))),
-      h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` },
-        `${e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)}`))))));
+    h('div', { class: 'day-head' }, h('strong', {}, formatLong(date)), h('span', {}, relative(ctx.today, date))),
+    h('ul', { class: 'list' }, evs.map((e) => h('li', {}, h('button', { class: 'list-item', onclick: () => eventSheet(e) },
+      h('span', { class: 'li-main' }, h('span', { class: 'li-title' }, e.name), sub(e) && h('span', { class: `li-sub ${e.overdue ? 'warn-text' : ''}` }, sub(e))),
+      h('span', { class: 'li-end' },
+        h('span', { class: `li-value ${e.kind === 'income' ? 'pos' : ''}` }, `${e.kind === 'income' ? '+' : '−'}${formatBRLShort(e.amount)}`),
+        icon('chevron', { size: 18, cls: 'chev' })))))))));
 }
 
 export function renderTimeline(ctx) {
-  const proj = projectBalance(ctx.state, ctx.today, ctx.budget);
+  const proj = projectBalance(ctx.state, ctx.today, ctx.budget, ctx.tomorrow);
   const c = chart(ctx, proj);
   return h('div', { class: 'screen timeline' },
     h('header', { class: 'screen-head' },
-      h('h1', {}, 'Linha do tempo'),
-      h('p', { class: 'sub' }, 'Toque no gráfico para ver cada dia')),
-    h('section', { class: 'card' },
-      c.readout,
-      c.chart,
-      legend()),
+      h('div', { class: 'titles' },
+        h('h1', {}, 'Linha do tempo'),
+        h('p', { class: 'sub' }, 'Saldo previsto, gastando o limite de cada dia'))),
+    h('section', { class: 'card chart-card' }, c.readout, c.chart),
     h('h2', { class: 'section-label' }, 'Próximos eventos'),
     h('section', { class: 'card flush' }, eventList(ctx, proj),
       addButton('Agendar receita', () => editIncome(null, { draft: { rule: { type: 'once', date: addDays(ctx.today, 1) } } }))));

@@ -23,6 +23,7 @@ PWA de finanças pessoais com orçamento diário dinâmico, offline e com backup
 
 - [Visão geral](#visão-geral)
 - [Funcionalidades](#funcionalidades)
+- [Design](#design)
 - [Como o orçamento é calculado](#como-o-orçamento-é-calculado)
 - [Privacidade e backup](#privacidade-e-backup)
 - [Arquitetura](#arquitetura)
@@ -37,7 +38,7 @@ PWA de finanças pessoais com orçamento diário dinâmico, offline e com backup
 
 Quem recebe em datas diferentes do mês e gasta todos os dias precisa de uma resposta simples: **quanto posso gastar hoje?** O Hoje calcula esse valor considerando o saldo real das contas, as receitas e despesas previstas e os aportes em metas, e recalcula tudo a cada dia.
 
-O app foi feito para uso com uma mão no celular: um número grande, um botão para lançar gasto e avisos só quando algo precisa de atenção.
+O app foi feito para uso com uma mão no celular: um número grande, o botão de lançar sempre ao alcance do polegar e avisos só quando algo precisa de atenção.
 
 | | |
 |---|---|
@@ -49,16 +50,28 @@ O app foi feito para uso com uma mão no celular: um número grande, um botão p
 
 ## Funcionalidades
 
-- **Quanto resta hoje:** o número em destaque é o que ainda pode ser gasto hoje. Logo abaixo aparece o limite diário, calculado para não faltar dinheiro até a véspera do próximo salário. No dia seguinte, sobras e excessos se redistribuem.
-- **Lançamento rápido de gastos e receitas:** teclado numérico, só o valor; nome e conta são opcionais. Uma receita lançada entra no saldo na hora e aumenta o limite do dia. O nome sugere os já usados e pode ser trocado depois, tocando no lançamento.
+- **Quanto resta hoje:** o número em destaque é o que ainda pode ser gasto hoje, com uma barra que esvazia conforme o limite é usado. Logo abaixo aparece o limite de amanhã, que sobe quando sobra dinheiro hoje e cai quando o gasto passa do limite. Um toque no ícone de informação mostra a conta que leva ao limite.
+- **Lançamento rápido de gastos e receitas:** o botão **+** fica na barra de abas, em todas as telas. Teclado numérico, só o valor; nome e conta são opcionais. Uma receita lançada entra no saldo na hora e aumenta o limite do dia. O nome sugere os já usados e pode ser trocado depois, tocando no lançamento.
 - **Resgates planejados:** mostra quantos dias o saldo da conta de gastos cobre e sugere quanto resgatar da reserva (por exemplo, um CDB de liquidez diária), arredondado e limitado ao saldo disponível. Também sugere aplicar o excedente quando sobra dinheiro.
 - **Receitas recorrentes e únicas:** dia fixo ou Nº dia útil do mês, com feriados nacionais (Sexta-feira Santa calculada pela Páscoa), opção de contar sábado e valor diferente em meses específicos. Receitas que acontecem uma única vez podem ser agendadas para uma data e entram no cálculo a partir dela.
 - **Confirmação de entradas e saídas:** receitas, contas e aportes só mexem no saldo quando você confirma. Dá para confirmar antes da data, mudar a data de uma ocorrência ou marcar que não aconteceu.
-- **Linha do tempo:** gráfico próprio em SVG com o saldo projetado até um mês depois do próximo salário e a lista cronológica dos eventos.
+- **Linha do tempo:** uma única linha, em SVG próprio, com o saldo previsto se você gastar o limite de cada dia, até um mês depois do próximo salário. A cada salário o limite é refeito, como o app fará no dia. Tocar no gráfico mostra o saldo e os eventos de cada dia; abaixo fica a lista cronológica do que está por vir.
 - **Contas:** saldos, uso de cada conta (gastos do dia, reserva ou nenhum), ajuste manual para conferir com o banco, transferências (que não contam como gasto) e movimentações agrupadas por dia.
 - **Metas:** progresso, prazo e aportes planejados.
-- **Ajustes:** receitas, despesas fixas, parâmetros de resgate e dados (backup na nuvem, exportar, importar). Cada informação mora em um lugar só.
+- **Ajustes:** receitas, despesas fixas, parâmetros de resgate e dados (backup na nuvem, exportar, importar). Abre pelo ícone no topo da tela Hoje. Cada informação mora em um lugar só.
 - **Configuração guiada:** no primeiro acesso, um assistente cadastra contas, receitas, despesas, metas e parâmetros. Nenhum dado pessoal fica no código.
+
+## Design
+
+Tema escuro único, pensado para uma mão só. As regras que guiam cada tela:
+
+- **Um número manda em cada tela.** Em Hoje, quanto resta para gastar; em Contas, o total nas contas de gasto; na Linha do tempo, o saldo do dia tocado.
+- **Cor só aparece quando carrega um estado.** Verde: dinheiro que entra ou folga. Vermelho: dinheiro que falta ou ação que apaga. Âmbar: o app precisa de você (resgatar, confirmar). Todo o resto é neutro.
+- **Ações são neutras.** A principal de cada tela é o botão claro; as secundárias, cinza. Lançar fica na barra de abas, ao alcance do polegar em qualquer tela.
+- **Os mesmos sinais em todo lugar.** Gasto com −, receita com + em verde, transferência com ⇄ e sem cor.
+- **Toque confortável e leitura garantida.** Alvos de toque de pelo menos 44 px, contraste AA nos textos e valores que encolhem para caber em telas estreitas.
+
+A tipografia é a [Figtree](https://github.com/erikdkennedy/figtree) (licença OFL), servida pelo próprio app para funcionar offline.
 
 ## Como o orçamento é calculado
 
@@ -113,6 +126,7 @@ hoje_app/
 │   ├── manifest.webmanifest
 │   ├── sw.js                    service worker: cache-first, offline
 │   ├── css/app.css              tema escuro, tokens de design
+│   ├── fonts/                   Figtree (licença OFL), servida pelo próprio app
 │   ├── icons/
 │   └── js/
 │       ├── app.js               roteador, renderização, virada de dia
@@ -121,7 +135,7 @@ hoje_app/
 │       │   ├── refill.js        cobertura e sugestão de resgate
 │       │   ├── schedule.js      recorrências, pendências e datas mudadas
 │       │   ├── businessDays.js  Páscoa, feriados e Nº dia útil
-│       │   ├── projection.js    série do gráfico
+│       │   ├── projection.js    saldo previsto dia a dia (linha do tempo)
 │       │   ├── vault.js         criptografia do backup
 │       │   ├── dates.js         datas sem fuso
 │       │   └── money.js         centavos e formatação pt-BR
@@ -160,7 +174,7 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 65 testes com o executor nativo do Node, sem dependências externas.
+São 70 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|
