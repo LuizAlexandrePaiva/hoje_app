@@ -111,11 +111,14 @@ test('só o dinheiro que existe na conta da receita', () => {
   assert.deepEqual([r.amount, r.bps, r.limitedBy, r.limitAfter], [16400, 656, 'balance', 17164]);
   applyTransaction(s, { id: 'ap2', type: 'transfer', date: D, amount: 14500, from: 'cc', to: 'cdb' }); // sobra R$ 19 na conta
   assert.deepEqual([suggestSaving(s, D, tx).amount, suggestSaving(s, D, tx).reason], [0, 'no-balance']);
-  // salário de 9/11 atrasado e não confirmado: o limite conta com ele, a regra não
+  // salário de 9/11 atrasado e não confirmado: o limite conta com ele, a regra não; a sugestão espera a confirmação
   const w = scenario();
   w.accounts[0].balance = -128000; w.accounts[1].balance = 0;
-  const rw = suggestSaving(w, '2026-11-11', income(w, '2026-11-11', 135000, 'cc', { ref: 'income:alugA:2026-11' }));
-  assert.deepEqual([rw.amount, rw.limitedBy, rw.cap], [7000, 'balance', 13500]);
+  const tw = income(w, '2026-11-11', 135000, 'cc', { ref: 'income:alugA:2026-11' });
+  const rw = suggestSaving(w, '2026-11-11', tw);
+  assert.deepEqual([rw.amount, rw.reason, rw.cap], [0, 'waiting', 13500]);
+  income(w, '2026-11-11', 250000, 'cc', { ref: 'income:sal:2026-11' });
+  assert.deepEqual([suggestSaving(w, '2026-11-11', tw).amount, suggestSaving(w, '2026-11-11', tw).limitedBy], [13500, 'cap']);
 });
 
 test('várias abertas: em sequência, a soma cabe e aceitar uma não muda as outras', () => {
@@ -212,7 +215,7 @@ test('propriedades em estados aleatórios', () => {
         save(t, tx, r.amount, today);
         assert.equal(limit(t, today), r.limitAfter);
         assert.ok(r.limitAfter >= r.floor && r.limitAfter > 0);
-        if (r.limitedBy === 'floor') { save(t, tx, 100, today); assert.ok(limit(t, today) < r.floor); }
+        if (r.limitedBy === 'floor') { save(t, tx, 100, today); assert.ok(computeDailyBudget(t, today).safeBudget < r.floor); }
       }
     }
     const v = structuredClone(s);
@@ -220,10 +223,45 @@ test('propriedades em estados aleatórios', () => {
     for (const o of open) {
       save(v, v.transactions.find((t) => t.id === o.tx.id), o.amount, today);
       rest.shift();
-      if (floor.basis === 'history') {
-        assert.deepEqual(openSavings(v, today).map((x) => [x.tx.id, x.amount]), rest);
-        assert.ok(limit(v, today) >= floor.floor);
-      }
+      assert.deepEqual(openSavings(v, today).map((x) => [x.tx.id, x.amount]), rest);
+      assert.ok(limit(v, today) >= floor.floor);
     }
   }
+});
+
+test('sem histórico: aceitar uma sugestão não rebaixa o piso nem abre linha nova', () => {
+  const day = '2026-11-11';
+  const s = scenario();
+  s.accounts[0].balance = 0; s.accounts[1].balance = 30000;
+  seguro(s, 330000);
+  const t1 = income(s, '2026-11-09', 250000, 'cc', { ref: 'income:sal:2026-11', desc: 'Salário' });
+  income(s, day, 135000, 'cc', { ref: 'income:alugA:2026-11', desc: 'Aluguel Sala' });
+  const before = limit(s, day);
+  assert.deepEqual(openSavings(s, day).map((o) => [o.tx.id, o.amount, o.limitedBy, o.basis]), [[t1.id, 19600, 'floor', 'limit']]);
+  save(s, t1, 19600, day);
+  assert.deepEqual(openSavings(s, day), []); // antes, o piso caía e surgia "Aluguel Sala R$ 135"
+  assert.ok(limit(s, day) >= Math.ceil(before * 0.9));
+});
+
+test('receita a confirmar e margem de segurança: a poupança não usa dinheiro que o limite não libera', () => {
+  // dinheiro curto, salário de 9/11 atrasado e margem de R$ 500: guardar deixaria o saldo abaixo da margem
+  const day = '2026-11-11';
+  const s = scenario();
+  s.accounts[0].balance = 57932 - 135000; s.accounts[1].balance = 0;
+  s.settings.cushion = 50000;
+  const tx = income(s, day, 135000, 'cc', { ref: 'income:alugA:2026-11', desc: 'Aluguel Sala' });
+  const b = computeDailyBudget(s, day);
+  assert.ok(b.heldToday > 0 && b.waiting.some((e) => e.key === 'income:sal:2026-11'));
+  assert.deepEqual([suggestSaving(s, day, tx).amount, suggestSaving(s, day, tx).reason], [0, 'waiting']);
+  assert.deepEqual(openSavings(s, day), []);
+});
+
+test('lançamento com data inválida (backup corrompido) fica sem sugestão e não derruba a tela', () => {
+  const { s } = payday();
+  for (const bad of [{ createdAt: 'abc' }, { createdAt: {} }, { createdAt: '2026-13-45T00:00:00Z' }]) income(s, D, 90000, 'cc', bad);
+  s.transactions.push({ id: 'sem-data', type: 'income', amount: 90000, to: 'cc' });
+  s.transactions.push({ id: 'data-num', type: 'income', amount: 90000, to: 'cc', date: 20261109 });
+  const open = openSavings(s, D);
+  assert.ok(open.every((o) => Number.isInteger(o.amount)));
+  assert.ok(!open.some((o) => ['sem-data', 'data-num'].includes(o.tx.id)));
 });

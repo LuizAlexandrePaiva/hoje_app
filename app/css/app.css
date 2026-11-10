@@ -196,7 +196,7 @@ body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
 .btn.danger { background: var(--neg); color: #2a0606; }
 .btn.quiet { background: transparent; color: var(--muted); }
 .btn.danger-text { background: transparent; color: var(--neg); }
-.btn.small { min-height: 40px; padding: 8px 14px; font-size: var(--fs-small); border-radius: 12px; flex: none; }
+.btn.small { min-height: 44px; padding: 8px 14px; font-size: var(--fs-small); border-radius: 12px; flex: none; }
 .btn.xl { min-height: 58px; font-size: 1.0625rem; border-radius: 18px; }
 .btn.block { width: 100%; }
 .btn-add {
@@ -224,10 +224,12 @@ body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
 .row-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; min-height: 62px; }
 .row-item + .row-item { border-top: 1px solid var(--line); }
 .li-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.li-main > .row { min-width: 0; }
+.li-main > .row { min-width: 0; flex-wrap: wrap; row-gap: 4px; }
 .li-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .li-title.muted { font-weight: 500; }
 .li-sub { color: var(--muted); font-size: var(--fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* linhas com botão ao lado e movimentações: o detalhe quebra a linha, não corta */
+.row-item .li-sub, .day-group .li-sub { white-space: normal; }
 .li-over { color: var(--muted); font-size: var(--fs-caption); }
 .li-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .li-end { display: flex; align-items: center; gap: 4px; flex: none; }
@@ -375,9 +377,11 @@ details.more > div { display: flex; flex-direction: column; gap: 16px; padding-b
   box-shadow: 0 12px 32px rgba(0, 0, 0, .55); font-size: var(--fs-small); font-weight: 550;
 }
 body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
+/* com folha aberta o aviso sobe (embaixo ele cobriria os controles da folha) e deixa livre o botão de fechar */
+body.no-scroll .toast { bottom: auto; top: calc(var(--safe-t) + 12px); left: calc(50% - 26px); width: calc(100% - 2 * var(--gutter) - 52px); max-width: 448px; }
 .toast-action {
   background: #0b0c0f14; border: 0; border-radius: 11px; color: var(--primary-ink); font-weight: 700;
-  min-height: 40px; padding: 0 14px; cursor: pointer; flex: none;
+  min-height: 44px; padding: 0 14px; cursor: pointer; flex: none;
 }
 
 /* ---------- barra de abas: lançar fica sempre ao alcance do polegar ---------- */

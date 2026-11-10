@@ -26,12 +26,14 @@ function fromUTC(ms) {
   return iso(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
 }
 
+// en-CA formata como AAAA-MM-DD; um formatador só, porque criar um a cada chamada custa caro
+const DAY_FORMAT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
 /** Dia de hoje no fuso de São Paulo, independente do fuso do aparelho. */
 export function todayISO(now = new Date()) {
-  // en-CA formata como AAAA-MM-DD
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(now);
+  return DAY_FORMAT.format(now);
 }
 
 export function addDays(s, n) {

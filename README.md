@@ -92,7 +92,7 @@ O cálculo é uma função pura, `computeDailyBudget(state, hoje)`, em [`app/js/
    É o maior valor que dá para repetir todo dia sem faltar dinheiro em nenhum dia da janela. Um compromisso depois do próximo salário já pesa hoje, e uma sobra grande é repartida pelos meses seguintes, não gasta até o próximo salário.
 4. **Receita a confirmar:** receita de hoje ou atrasada, ainda não confirmada, entra no limite, mas não libera gasto. Até a confirmação, "Resta para gastar" é o que caberia sem ela.
 
-**Exemplo:** R$ 2.379 nas contas de gasto, salário em 9/11 e nenhum outro evento até lá. O dia mais apertado é 8/11, véspera do salário (14 dias), e o limite é R$ 2.379 ÷ 14 = **R$ 169,93 por dia**. Se você gastar R$ 100 a menos hoje, a sobra é repartida até 6/12, véspera do salário seguinte, e amanhã o limite sobe para R$ 177,54.
+**Exemplo:** R$ 2.379 nas contas de gasto, salário em 9/11 e nenhum outro evento até lá. O dia mais apertado é 8/11, véspera do salário (14 dias), e o limite é R$ 2.379 ÷ 14 = **R$ 169,93 por dia**. Se você gastar R$ 100 a menos hoje, a sobra é repartida até 6/12, véspera do salário seguinte. Com R$ 6.750 de receitas e R$ 1.780 de despesas e aportes previstos até lá, amanhã o limite sobe para (2.379 − 69,93 + 6.750 − 1.780) ÷ 41 = R$ 177,54.
 
 **Regras complementares**
 
@@ -206,7 +206,7 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 120 testes com o executor nativo do Node, sem dependências externas.
+São 127 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|
@@ -262,7 +262,7 @@ Abra o app uma vez com internet; depois disso ele funciona offline. Use sempre o
 - Uma única moeda (R$) e um único usuário por backup.
 - No iPhone, o Safari e o app instalado não compartilham dados automaticamente; a sincronização entre eles depende do backup na nuvem.
 - Recorrências são mensais; despesas semanais ou anuais precisam ser lançadas como exceções ou gastos avulsos.
-- O limite olha 12 meses à frente e confia nas receitas e despesas fixas cadastradas. Se as despesas fixas passam das receitas no período, o app mostra "Sem folga" desde já. Meses futuros usam o valor base de cada despesa fixa.
+- O limite olha 12 meses à frente e confia nas receitas e despesas fixas cadastradas. Se as despesas fixas passam das receitas no período, o app mostra "Sem folga" desde já. Meses futuros usam o valor cadastrado de cada despesa fixa, ou o valor diferente daquele mês, se houver.
 - Sem receita recorrente cadastrada a janela é de 30 dias, e o limite pode cair quando uma despesa entra nela.
 - Fatura de cartão: sem parcelamento, sem itens negativos (estornos) e sem pagamento parcial.
 - A poupança sugerida registra a transferência; o dinheiro é movido por você no banco.

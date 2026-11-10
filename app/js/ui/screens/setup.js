@@ -1,7 +1,7 @@
 // Assistente do primeiro acesso: cadastra contas, receitas, despesas, metas
 // e parâmetros. Cada passo salva no aparelho, então dá para fechar e voltar.
 
-import { h, toast, confirmDialog } from '../dom.js';
+import { h, toast } from '../dom.js';
 import { icon } from '../icons.js';
 import * as store from '../../data/store.js';
 import { accountsList, incomesList, expensesList, goalsList, contributionsList } from '../editors.js';
@@ -22,7 +22,7 @@ const STEPS = [
   {
     title: 'Receitas',
     lead: 'Receitas que se repetem todo mês.',
-    tips: ['Marque o salário: o orçamento vai até a véspera dele.', 'Nada entra no saldo antes de você confirmar.'],
+    tips: ['Marque o salário: a linha do tempo vai até um mês depois dele.', 'Nada entra no saldo antes de você confirmar.'],
     render: (s) => [incomesList(s, null)],
   },
   {
@@ -71,11 +71,9 @@ export function renderSetup(ctx) {
   const cur = STEPS[step];
   const last = step === STEPS.length - 1;
 
-  const next = async () => {
+  const next = () => {
     const ok = cur.valid ? cur.valid(state) : true;
     if (ok !== true) return toast(ok);
-    if (step === 2 && !state.incomes.some((i) => i.isSalary)
-      && !(await confirmDialog('Nenhum salário marcado', 'Sem salário, o orçamento usa a próxima receita (ou 30 dias).', 'Seguir assim'))) return;
     if (last) {
       store.finishSetup();
       ctx.navigate('#/hoje', { replace: true });

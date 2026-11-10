@@ -5,7 +5,7 @@
 // A conta usa o próprio limite (computeDailyBudget): o que a regra promete é
 // exatamente o que o app mostra depois de guardar.
 
-import { addDays, diffDays, todayISO } from './dates.js';
+import { addDays, diffDays, isValidISO, todayISO } from './dates.js';
 import { computeDailyBudget, spendingAccountIds, withDelta } from './budget.js';
 
 export const SAVINGS = {
@@ -20,6 +20,8 @@ export const SAVINGS = {
 };
 
 const limitOf = (state, today) => computeDailyBudget(state, today).dailyBudget;
+// o que está liberado: o limite sem as receitas ainda não confirmadas (igual ao limite quando não há nenhuma)
+const releasedOf = (state, today) => computeDailyBudget(state, today).safeBudget;
 
 /** Gasto típico por dia: gastos lançados nos últimos 30 dias completos ÷ dias desde o primeiro deles. */
 export function typicalSpend(state, today, ids = spendingAccountIds(state)) {
@@ -58,7 +60,7 @@ export function savingsDestination(state) {
 /**
  * Quanto guardar de uma receita já lançada (`tx`, com o valor já no saldo).
  * `floorInfo` fixa o piso quando várias sugestões são calculadas em sequência.
- * reason: 'ok' | 'none' | 'outside' | 'small' | 'no-room' | 'tight' | 'no-balance'
+ * reason: 'ok' | 'none' | 'outside' | 'small' | 'no-room' | 'tight' | 'waiting' | 'no-balance'
  * limitedBy: 'cap' | 'floor' | 'balance' | null
  */
 export function suggestSaving(state, today, tx, floorInfo) {
@@ -75,13 +77,15 @@ export function suggestSaving(state, today, tx, floorInfo) {
   const out = { ...base, limit, limitAfter: limit, floor: f.floor, basis: f.basis, typical: f.typical, days: f.days };
   if (limit <= 0) return { ...out, reason: 'no-room' };
   if (limit < f.floor) return { ...out, reason: 'tight', limitedBy: 'floor' };
+  // receita a confirmar não libera gasto nem poupança: até lá vale o que caberia sem ela
+  if (releasedOf(state, today) < f.floor) return { ...out, reason: 'waiting', limitedBy: 'floor' };
 
   // só o dinheiro que existe: nem mais que o saldo da conta da receita, nem mais que a soma das contas de gasto
   const pooled = state.accounts.filter((a) => ids.has(a.id)).reduce((s, a) => s + a.balance, 0);
   const source = state.accounts.find((a) => a.id === tx.to).balance;
   const liquid = Math.max(0, Math.min(pooled, source));
   const top = Math.floor(Math.min(cap, liquid) / SAVINGS.step);
-  const after = (m) => limitOf(withDelta(state, tx.to, -m * SAVINGS.step), today);
+  const after = (m) => releasedOf(withDelta(state, tx.to, -m * SAVINGS.step), today);
 
   let m = top;
   let limitedBy = cap <= liquid ? 'cap' : 'balance';
@@ -100,12 +104,14 @@ export function suggestSaving(state, today, tx, floorInfo) {
   if (amount < SAVINGS.minAmount || amount * 10000 < received * SAVINGS.minBps) {
     return { ...out, limitedBy, reason: limitedBy === 'balance' ? 'no-balance' : 'tight' };
   }
-  return { ...out, amount, bps: Math.floor((amount * 10000) / received), limitedBy, limitAfter: after(m), reason: 'ok' };
+  return { ...out, amount, bps: Math.floor((amount * 10000) / received), limitedBy, limitAfter: limitOf(withDelta(state, tx.to, -amount), today), reason: 'ok' };
 }
 
 /** Dia em que a receita foi lançada (fuso do app); sem createdAt, a data dela. */
 function registeredOn(tx) {
-  return tx.createdAt ? todayISO(new Date(tx.createdAt)) : tx.date;
+  const d = tx.createdAt ? new Date(tx.createdAt) : null;
+  if (d && !Number.isNaN(d.getTime())) return todayISO(d);
+  return isValidISO(tx.date) ? tx.date : null; // backup corrompido: sem data, sem sugestão
 }
 
 /**
@@ -119,13 +125,19 @@ export function openSavings(state, today) {
   const ids = spendingAccountIds(state);
   const txs = state.transactions || [];
   const saved = new Set(txs.filter((t) => t.savingOf).map((t) => t.savingOf));
-  const open = txs.filter((t) => {
-    if (t.type !== 'income' || !(t.amount > 0) || !ids.has(t.to) || t.savingSkipped || saved.has(t.id)) return false;
-    const age = diffDays(registeredOn(t), today);
+  const recent = (t) => {
+    const on = registeredOn(t);
+    if (!on) return false;
+    const age = diffDays(on, today);
     return age >= 0 && age < SAVINGS.openDays;
-  });
+  };
+  const open = txs.filter((t) => t.type === 'income' && t.amount > 0 && ids.has(t.to) && !t.savingSkipped && !saved.has(t.id) && recent(t));
   if (!open.length) return [];
-  const floorInfo = savingFloor(state, today, undefined, ids);
+  // sem histórico o piso é 90% do limite: mede esse limite sem as poupanças dos últimos 7 dias,
+  // senão cada aceite rebaixaria o piso e abriria uma linha que não estava na tela
+  const before = txs.filter((t) => t.type === 'transfer' && t.savingOf && recent(t))
+    .reduce((st, t) => withDelta(withDelta(st, t.from, t.amount), t.to, -t.amount), state);
+  const floorInfo = savingFloor(before, today, undefined, ids);
   const to = savingsDestination(state)?.id ?? null;
   let work = state;
   const out = [];

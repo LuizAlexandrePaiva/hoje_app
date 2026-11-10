@@ -142,7 +142,8 @@ export function toast(message, action) {
       onclick: () => { el.remove(); action.run(); },
     }, action.label));
   document.body.append(el);
-  toastTimer = setTimeout(() => el.remove(), action ? 5000 : 2500);
+  // sem ação, o tempo acompanha o tamanho do texto
+  toastTimer = setTimeout(() => el.remove(), action ? 5000 : Math.max(2500, 1500 + String(message).length * 50));
 }
 
 export function confirmDialog(title, message, okLabel = 'Confirmar', danger = false) {

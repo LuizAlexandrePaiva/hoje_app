@@ -29,11 +29,16 @@ export function projectBalance(state, today, budget) {
     byDay.get(e.effectiveDate).push(e);
   }
   const paydays = all.filter((e) => e.kind === 'income');
-  const lastIncome = all.reduce((m, e) => (e.flow > 0 && e.date > m ? e.date : m), '');
-  const cycleEnd = (day) => {
-    const next = paydays.filter((e) => e.date > day);
+  // cada dia só enxerga o que o app lerá nele: ocorrências até `to` = dia + SCAN_DAYS
+  const lastIncome = (to) => all.reduce((m, e) => (e.flow > 0 && e.date <= to && e.date > m ? e.date : m), '');
+  const cycleEnd = (day, to) => {
+    const next = paydays.filter((e) => e.date > day && e.date <= to);
     const sal = next.find((e) => e.isSalary) || next[0];
     return sal ? addDays(sal.date, -1) : addDays(day, FALLBACK_HORIZON_DAYS - 1);
+  };
+  const lookDays = (day) => {
+    const to = addDays(day, SCAN_DAYS);
+    return lookDaysFor(day, cycleEnd(day, to), lastIncome(to));
   };
 
   const cushion = budget.cushion || 0;
@@ -43,7 +48,7 @@ export function projectBalance(state, today, budget) {
     const day = addDays(today, i);
     const limit = i === 0
       ? Math.max(budget.dailyBudget - budget.spentToday, 0)
-      : Math.max(sustainableRate(balance - cushion, series, i, lookDaysFor(day, cycleEnd(day), lastIncome)).rate, 0);
+      : Math.max(sustainableRate(balance - cushion, series, i, lookDays(day)).rate, 0);
     balance += series.net[i] - limit;
     points.push({ date: day, balance, limit, dayEvents: byDay.get(day) || [] });
   }

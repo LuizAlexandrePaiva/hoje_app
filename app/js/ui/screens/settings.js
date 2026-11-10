@@ -41,7 +41,9 @@ export function refillSettings(state, { withAccounts = false } = {}) {
     store.updateSettings(patch);
     toast('Salvo');
   };
-  for (const el of [def, res, threshold, target, step, surplus.input]) el?.addEventListener('change', save);
+  for (const el of [def, res, surplus.input]) el?.addEventListener('change', save);
+  // campos de digitar: o toque que tirou o foco ainda está em curso, e redesenhar agora engoliria o clique
+  for (const el of [threshold, target, step]) el.addEventListener('change', () => setTimeout(save, 250));
 
   return h('section', { class: 'card' },
     withAccounts && field('Gastos do dia', def, 'Conta de onde saem os gastos lançados.'),
@@ -60,8 +62,7 @@ function limitSettings(state) {
     const v = input.value.trim() === '' ? 0 : parseBRL(input.value);
     if (!Number.isInteger(v) || v < 0) return toast('Valor inválido.');
     if (v === (state.settings.cushion || 0)) return;
-    store.updateSettings({ cushion: v });
-    toast('Salvo');
+    setTimeout(() => { store.updateSettings({ cushion: v }); toast('Salvo'); }, 250); // idem: não engole o toque em curso
   });
   return h('section', { class: 'card' },
     field('Margem de segurança', input, 'O limite nunca usa esse valor. Fica nas contas de gasto para imprevistos.'));

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { computeDailyBudget, computeTomorrowBudget } from '../app/js/core/budget.js';
 import { projectBalance } from '../app/js/core/projection.js';
 import { applyTransaction } from '../app/js/data/ledger.js';
+import { addDays } from '../app/js/core/dates.js';
 import { TODAY, scenario } from './fixtures.js';
 
 const empty = () => { const s = scenario(); s.accounts[0].balance = 0; s.accounts[1].balance = 0; return s; };
@@ -143,4 +144,19 @@ test('projeção: igual a seguir o app dia a dia, sem nunca ficar negativa', () 
     spend(sim, b.remainingToday, pt.date);
     assert.equal(computeDailyBudget(sim, pt.date).spendableNow, pt.balance);
   }
+});
+
+test('projeção: cada dia futuro enxerga só o que o app lerá nele (receita única a mais de 400 dias)', () => {
+  const s = scenario();
+  s.accounts[0].balance = 600000; s.accounts[1].balance = 0;
+  s.expenses = []; s.contributions = [];
+  s.incomes = [
+    { id: 'u1', name: 'Venda', amount: 3000000, accountId: 'cc', isSalary: false, rule: { type: 'once', date: addDays(TODAY, 12) }, exceptions: {} },
+    { id: 'u2', name: 'Longe', amount: 500000, accountId: 'cc', isSalary: false, rule: { type: 'once', date: addDays(TODAY, 430) }, exceptions: {} },
+  ];
+  const b = computeDailyBudget(s, TODAY);
+  const p = projectBalance(s, TODAY, b);
+  // amanhã, depois de gastar o limite de hoje, o app mostra o mesmo limite que a linha do tempo usou
+  applyTransaction(s, { id: 'g', type: 'spend', date: TODAY, amount: b.dailyBudget, from: 'cc' });
+  assert.equal(p.points[1].limit, computeDailyBudget(s, addDays(TODAY, 1)).dailyBudget);
 });

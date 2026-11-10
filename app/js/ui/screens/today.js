@@ -78,7 +78,7 @@ function explainSheet(ctx) {
       row(u.days === 1 ? 'Dias' : `Dias até ${day}`, `÷ ${u.days}`),
       h('span', { class: 'rule' }),
       row('Limite por dia', formatBRL(b.dailyBudget), `total ${b.dailyBudget < 0 ? 'neg' : ''}`)),
-    n > 0 && h('p', { class: 'sheet-lead' }, `${pendingNames(b.waiting)} ainda ${n === 1 ? 'não foi confirmado' : 'não foram confirmados'}. Até lá, fica liberado só o que caberia sem ${n === 1 ? 'essa receita' : 'essas receitas'}: ${formatBRL(Math.max(b.safeBudget, 0))} por dia.`),
+    n > 0 && h('p', { class: 'sheet-lead' }, `Falta confirmar ${pendingNames(b.waiting)}. Até lá, fica liberado só o que caberia sem ${n === 1 ? 'essa receita' : 'essas receitas'}: ${formatBRL(Math.max(b.safeBudget, 0))} por dia.`),
     h('div', { class: 'calc' },
       row('Amanhã, sem gastar mais nada hoje', formatBRL(ctx.tomorrow.dailyBudget), 'total')),
     h('p', { class: 'field-hint' }, 'A conta é refeita todo dia com o saldo real. O que sobra hoje é repartido pelos próximos dias; o que passa do limite é descontado deles.'),
@@ -137,7 +137,7 @@ function savingCard(ctx) {
       ctx.savings.map((s) => h('div', { class: 'row-item' },
         h('span', { class: 'li-main' },
           h('span', { class: 'li-title' }, s.tx.desc || 'Receita'),
-          h('span', { class: 'li-sub' }, `${formatBRLShort(s.amount)}, ${formatPercent(s.bps)} do que entrou`)),
+          h('span', { class: 'li-sub' }, `${formatBRLShort(s.amount)} (${formatPercent(s.bps)} do que entrou)`)),
         h('button', {
           class: 'btn small', 'aria-label': `Guardar ${formatBRLShort(s.amount)} de ${s.tx.desc || 'receita'}`,
           onclick: () => savingSheet(s.tx.id),

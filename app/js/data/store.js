@@ -87,6 +87,7 @@ function normalize(data) {
   const s = { ...base, ...data };
   s.settings = { ...base.settings, ...(data.settings || {}) };
   s.settings.refill = { ...DEFAULT_REFILL, ...(s.settings.refill || {}) };
+  s.settings.cushion = Number.isInteger(s.settings.cushion) && s.settings.cushion > 0 ? s.settings.cushion : 0;
   for (const k of ['accounts', 'incomes', 'expenses', 'goals', 'contributions', 'transactions']) {
     if (!Array.isArray(s[k])) s[k] = [];
   }
@@ -105,7 +106,10 @@ export function exportJSON() {
 
 export function importJSON(text) {
   const data = JSON.parse(text);
-  if (data.app && data.app !== 'hoje') throw new Error('Este arquivo não é um backup do Hoje');
+  // só troca os dados por algo que tem a forma de um backup (antes, um JSON qualquer apagava tudo)
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.accounts) || (data.app && data.app !== 'hoje')) {
+    throw new Error('Este arquivo não é um backup do Hoje');
+  }
   replaceState(data);
 }
 
@@ -187,6 +191,11 @@ export function skipOccurrence(event) {
 
 /** Guarda parte de uma receita: transferência da conta dela para uma conta de meta. */
 export function saveFromIncome(incomeId, amount, toAccountId) {
+  // uma poupança por receita, valor inteiro positivo e destino fora do orçamento; senão nada muda
+  const ok = state.transactions.some((t) => t.id === incomeId && t.type === 'income')
+    && !state.transactions.some((t) => t.savingOf === incomeId)
+    && Number.isSafeInteger(amount) && amount > 0 && getAccount(toAccountId)?.kind === 'goal';
+  if (!ok) return null;
   return commit((s) => {
     const inc = s.transactions.find((t) => t.id === incomeId && t.type === 'income');
     if (!inc) return null;

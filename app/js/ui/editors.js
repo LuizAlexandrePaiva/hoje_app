@@ -9,6 +9,7 @@ import { todayISO, formatFull, formatShort, formatDayMonth, formatMonth, shiftMo
 import { MAX_MOVE_DAYS, occurrenceByKey, currentInvoices } from '../core/schedule.js';
 import { invoiceKey, parseInvoiceKey } from '../core/invoice.js';
 import { computeDailyBudget, withDelta } from '../core/budget.js';
+import { suggestRefill } from '../core/refill.js';
 import { SAVINGS, openSavings, suggestSaving } from '../core/savings.js';
 
 // ---------- campos ----------
@@ -209,7 +210,7 @@ export function editIncome(income, { draft, onSaved } = {}) {
   const n = numberInput(i.rule.type === 'businessDay' ? i.rule.n : 5, { maxlength: 2, 'aria-label': 'Qual dia útil' });
   const day = numberInput(i.rule.type === 'fixedDay' ? i.rule.day : 10, { maxlength: 2, 'aria-label': 'Dia do mês' });
   const sat = switchRow('Sábado conta como dia útil', 'Se cair no sábado, recebe na sexta.', i.rule.countSaturday);
-  const salary = switchRow('É o salário', 'O orçamento vai até a véspera dele.', i.isSalary);
+  const salary = switchRow('É o salário', 'A linha do tempo vai até um mês depois dele.', i.isSalary);
   const since = dateInput(i.since || todayISO());
   const exc = exceptionsEditor(i.exceptions);
   const nRow = inlineField('Qual dia útil', n, 'Desconta fins de semana e feriados.');
@@ -433,7 +434,7 @@ export function eventSheet(event) {
   const moved = event.originalDate && event.date !== event.originalDate;
   sheet(event.name, () => [
     h('div', { class: 'stat' },
-      h('span', { class: 'stat-label' }, `Previsto para ${formatDayMonth(event.date, ref)}${moved ? `, antes ${formatDayMonth(event.originalDate, ref)}` : ''}`),
+      h('span', { class: 'stat-label' }, `Previsto para ${formatDayMonth(event.date, ref)}${moved ? `, era ${formatDayMonth(event.originalDate, ref)}` : ''}`),
       moneyText(formatBRL(event.amount), `lg ${event.kind === 'income' ? 'pos' : ''}`, { 'data-fit': true })),
     h('button', { class: 'btn primary block', onclick: () => confirmOccurrenceSheet(event) }, cfg.early),
     h('button', { class: 'btn block', onclick: () => moveSheet(event) }, 'Mudar a data'),
@@ -506,6 +507,8 @@ function savingTip(tx) {
   if (state.settings.savingsEnabled === false) return {};
   const today = todayISO();
   const s = openSavings(state, today).find((o) => o.tx.id === tx.id);
+  // com aviso de resgate na tela, a poupança espera: um pedido por vez
+  if (s && suggestRefill(state, today, computeDailyBudget(state, today)).show) return {};
   if (s) return { action: { label: `Guardar ${formatBRLShort(s.amount)}`, run: () => savingSheet(tx.id) } };
   const why = suggestSaving(state, today, tx).reason;
   return why === 'tight' || why === 'no-room' ? { note: '. Mês apertado, nada a guardar desta vez.' } : {};
@@ -527,15 +530,17 @@ export function savingSheet(txId) {
   const submit = h('button', { type: 'submit', class: 'btn primary' });
   const err = errorBox();
   const read = () => parseBRL(value.value);
+  // o limite real de agora: s.limit de uma linha posterior já conta com as anteriores guardadas
+  const now = computeDailyBudget(state, today).dailyBudget;
   const sync = () => {
     const v = read();
     const ok = v > 0;
-    const after = ok ? computeDailyBudget(withDelta(state, tx.to, -v), today).dailyBudget : s.limit;
+    const after = ok ? computeDailyBudget(withDelta(state, tx.to, -v), today).dailyBudget : now;
     const below = ok && after < s.floor;
     hint.classList.toggle('neg', below);
     hint.textContent = below
       ? `Limite do dia cai para ${formatBRL(after)}, abaixo do mínimo da regra (${formatBRL(s.floor)}).`
-      : `Limite do dia: de ${formatBRL(s.limit)} para ${formatBRL(after)}.${s.typical != null && after < s.typical ? ` Você costuma gastar ${formatBRL(s.typical)}.` : ''}`;
+      : `Limite do dia: de ${formatBRL(now)} para ${formatBRL(after)}.${s.typical != null && after < s.typical ? ` Você costuma gastar ${formatBRL(s.typical)}.` : ''}`;
     if (goals.length) submit.textContent = ok ? `Guardar ${formatBRLShort(v)}` : 'Guardar';
   };
   value.addEventListener('input', sync);
@@ -547,18 +552,19 @@ export function savingSheet(txId) {
   const createAccount = () => editAccount(null, { draft: { name: 'Poupança', kind: 'goal' }, onSaved: () => savingSheet(txId) });
   if (!goals.length) submit.textContent = 'Criar conta de meta';
   sync();
-  sheet(`${name}: guardar parte?`, (close) => form(() => {
+  sheet('Guardar parte?', (close) => form(() => {
     if (!goals.length) return createAccount();
     const v = read();
     if (Number.isNaN(v) || v <= 0) return fail(err, 'Informe o valor.');
     if (v > s.cap) return fail(err, `No máximo ${formatBRL(s.cap)}, ${formatPercent(SAVINGS.capBps)} do que entrou.`);
     if (v > from.balance) return fail(err, `${from.name} tem só ${formatBRL(from.balance)}.`);
     const to = store.getAccount(toSel ? toSel.value : s.to);
-    const t = store.saveFromIncome(tx.id, v, to.id);
+    const t = to && store.saveFromIncome(tx.id, v, to.id);
+    if (!t) { close(); return toast('Esta sugestão não está mais disponível.'); }
     close();
     toast(`${formatBRL(v)} guardados em ${to.name}`, { label: 'Desfazer', run: () => { store.deleteTransaction(t.id); toast('Poupança desfeita'); } });
   },
-  h('p', { class: 'sheet-lead' }, `Entraram ${formatBRL(tx.amount)}. ${lead}`),
+  h('p', { class: 'sheet-lead' }, `${name}: entraram ${formatBRL(tx.amount)}. ${lead}`),
   h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Valor'), h('span', { class: 'money' }, value), hint),
   !goals.length && h('p', { class: 'field-hint' }, 'Falta uma conta de meta para receber o valor. Ela fica fora do limite do dia.'),
   toSel && field('Para', toSel, `Sai de ${from.name}. Faça a transferência no banco e registre aqui.`),
@@ -568,14 +574,14 @@ export function savingSheet(txId) {
       row('Entrou', formatBRL(tx.amount)),
       row(`Teto de ${formatPercent(SAVINGS.capBps)}`, formatBRL(s.cap)),
       s.limitedBy === 'balance' && row(`Saldo de ${from.name}`, formatBRL(from.balance)),
-      row('Limite do dia hoje', formatBRL(s.limit)),
+      row('Limite do dia hoje', formatBRL(now)),
       s.typical != null && row('Você costuma gastar por dia', formatBRL(s.typical)),
       row('Mínimo depois de guardar', formatBRL(s.floor)),
       h('span', { class: 'rule' }),
       row('Sugestão', formatBRL(s.amount), 'total')),
     h('p', { class: 'field-hint' }, s.basis === 'history'
       ? `O mínimo é 90% do que você gastou por dia nos últimos ${days} dias. A sugestão é o maior valor, em reais inteiros, que respeita o teto e o mínimo.`
-      : 'Ainda sem 7 dias de gastos lançados. Por enquanto, o mínimo é 90% do limite de hoje.')),
+      : 'Ainda sem 7 dias de gastos lançados. Por enquanto, o mínimo é 90% do limite antes de guardar.')),
   err,
   h('div', { class: 'form-actions' },
     h('button', {
@@ -728,7 +734,7 @@ function invoiceGone(e) {
 }
 
 /** Fatura de um cartão em um mês: valor previsto, estado, gastos e pagamento. */
-export function invoiceSheet(key, { scroll } = {}) {
+export function invoiceSheet(key, { scroll, focus } = {}) {
   const state = store.getState();
   const today = todayISO();
   const ref = yearOf(today);
@@ -771,7 +777,7 @@ export function invoiceSheet(key, { scroll } = {}) {
     const movedDate = occ.date !== occ.originalDate;
     line = occ.date < today ? `Venceu ${due}, ${relative(today, occ.date)}`
       : occ.date === today ? `Vence hoje, ${due}`
-        : `Vence ${due}, ${movedDate ? `antes ${formatDayMonth(occ.originalDate, ref)}` : relative(today, occ.date)}`;
+        : `Vence ${due}, ${movedDate ? `era ${formatDayMonth(occ.originalDate, ref)}` : relative(today, occ.date)}`;
     tone = occ.date <= today ? 'warn-text' : '';
     const diff = inv.total - inv.estimate;
     note = inv.count && diff ? `${formatBRL(Math.abs(diff))} ${diff > 0 ? 'acima' : 'abaixo'} do previsto.` : null;
@@ -783,7 +789,7 @@ export function invoiceSheet(key, { scroll } = {}) {
   const closed = switchRow('Fatura fechada', 'Vale a soma dos gastos, não o previsto.', inv.closed);
   closed.input.addEventListener('change', () => {
     try { store.setInvoiceClosed(key, closed.input.checked); } catch (e) { return invoiceGone(e); }
-    invoiceSheet(key, { scroll: document.querySelector('.sheet')?.scrollTop });
+    invoiceSheet(key, { scroll: document.querySelector('.sheet')?.scrollTop, focus: '.switch input' });
   });
 
   const row = (it) => h('li', {}, h('button', { class: 'list-item', onclick: () => invoiceItemSheet(key, it) },
@@ -797,9 +803,9 @@ export function invoiceSheet(key, { scroll } = {}) {
 
   sheet(occ.name, () => [
     h('div', { class: 'month-nav' },
-      prev ? h('button', { class: 'icon-btn', 'aria-label': 'Mês anterior', onclick: () => invoiceSheet(prev) }, icon('back')) : h('span'),
-      h('span', { class: 'li-title center', 'aria-live': 'polite' }, cap(formatMonth(p.month))),
-      next ? h('button', { class: 'icon-btn', 'aria-label': 'Próximo mês', onclick: () => invoiceSheet(next) }, icon('chevron')) : h('span')),
+      prev ? h('button', { class: 'icon-btn', 'aria-label': 'Mês anterior', onclick: () => invoiceSheet(prev, { focus: '[aria-label="Mês anterior"]' }) }, icon('back')) : h('span'),
+      h('span', { class: 'li-title center', tabindex: -1 }, cap(formatMonth(p.month))),
+      next ? h('button', { class: 'icon-btn', 'aria-label': 'Próximo mês', onclick: () => invoiceSheet(next, { focus: '[aria-label="Próximo mês"]' }) }, icon('chevron')) : h('span')),
     h('div', { class: 'stat' },
       h('div', { class: 'row between gap' },
         h('span', { class: 'stat-label' }, h('span', { class: tone }, line)),
@@ -820,6 +826,8 @@ export function invoiceSheet(key, { scroll } = {}) {
   const panel = document.querySelector('.sheet');
   if (scroll === 'add') panel.querySelector('[data-add]')?.scrollIntoView({ block: 'center' });
   else if (scroll != null) panel.scrollTop = scroll;
+  // a folha é refeita a cada troca: devolve o foco ao controle usado (ou ao mês, se ele sumiu)
+  if (focus) (panel.querySelector(focus) || panel.querySelector('.month-nav .li-title'))?.focus({ preventScroll: true });
 }
 
 /** Um gasto da fatura: nome e valor. Em gasto novo dá para salvar e já lançar o próximo. */
@@ -856,7 +864,7 @@ function invoiceItemSheet(key, item) {
     if (!saved) return;
     added++;
     const sum = occurrenceByKey(store.getState(), key)?.invoice.sum ?? 0;
-    lead.textContent = `${saved.name || 'Gasto'} lançado. Os gastos somam ${formatBRL(sum)}.`;
+    lead.textContent = `${saved.name ? `${saved.name}: gasto lançado` : 'Gasto lançado'}. Os gastos somam ${formatBRL(sum)}.`;
     err.textContent = '';
     name.value = '';
     value.value = '';

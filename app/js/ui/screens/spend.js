@@ -18,7 +18,7 @@ const MODES = {
   income: { label: 'Receita', account: 'Entra em', placeholder: 'Nome da receita (opcional)', list: 'nomes-receitas' },
 };
 
-function warnNegative(accountId) {
+function warnNegative(accountId, undo) {
   const s = store.getState();
   const acc = store.getAccount(accountId);
   if (!acc || acc.balance >= 0 || accountId !== s.settings.defaultAccountId) return;
@@ -35,6 +35,8 @@ function warnNegative(accountId) {
     h('div', { class: 'form-actions' },
       h('button', { class: 'btn grow', onclick: close }, 'Agora não'),
       refill.amount > 0 && h('button', { class: 'btn warn grow', onclick: () => refillSheet({ refill }) }, 'Resgatar')),
+    // esta folha tira da tela o aviso com "Desfazer": a ação continua aqui
+    h('button', { class: 'btn quiet block', onclick: () => { close(); undo(); } }, 'Desfazer o gasto'),
   ]), 350);
 }
 
@@ -96,7 +98,9 @@ export function renderSpend(ctx) {
       const left = b.remainingToday - v; // do que está liberado agora
       const full = b.dailyBudget - b.spentToday - v; // do limite, contando receitas a confirmar
       const w = b.waiting;
-      hint.textContent = v === 0
+      hint.textContent = b.dailyBudget < 0
+        ? (v === 0 ? 'Sem folga hoje' : `Sem folga hoje. Amanhã fica em ${formatBRL(tomorrowAfterSpend(state, ctx.today, accountId, v))}`)
+        : v === 0
         ? (b.remainingToday >= 0 ? `Resta para gastar hoje: ${formatBRL(b.remainingToday)}` : `Já passou ${formatBRL(-b.remainingToday)} do limite de hoje`)
         : left >= 0 ? `Sobram ${formatBRL(left)} hoje`
           : full >= 0 ? `Passa ${formatBRL(-left)} do liberado até confirmar ${w.length === 1 ? w[0].name : 'as receitas pendentes'}`
@@ -133,10 +137,9 @@ export function renderSpend(ctx) {
     }
     const t = store.addSpend(v, name, accountId);
     ctx.navigate('#/hoje', { replace: true });
-    toast(`Gasto de ${formatBRL(v)} lançado`, {
-      label: 'Desfazer', run: () => { store.deleteTransaction(t.id); toast('Gasto desfeito'); },
-    });
-    warnNegative(accountId);
+    const undo = () => { store.deleteTransaction(t.id); toast('Gasto desfeito'); };
+    toast(`Gasto de ${formatBRL(v)} lançado`, { label: 'Desfazer', run: undo });
+    warnNegative(accountId, undo);
   }
 
   /** Receita que vai cair em outro dia: agenda uma receita única, já preenchida. */
@@ -148,7 +151,7 @@ export function renderSpend(ctx) {
       },
       onSaved: (inc) => {
         ctx.navigate('#/hoje', { replace: true });
-        toast(`${inc.name}: agendada para ${formatDayMonth(inc.rule.date)}`);
+        toast(inc.rule.type === 'once' ? `${inc.name}: agendada para ${formatDayMonth(inc.rule.date)}` : `${inc.name}: receita salva`);
       },
     });
   }
