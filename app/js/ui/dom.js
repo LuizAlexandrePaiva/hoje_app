@@ -92,10 +92,14 @@ function focusables(panel) {
 const KEYBOARD_GAP = 58;
 const FIELD = 'input:not([type=checkbox]):not([type=radio]), select, textarea';
 
-/** Mantém o campo à vista dentro da folha, rolando só a própria folha. */
-function reveal(el = document.activeElement) {
+/**
+ * Mantém o campo à vista dentro da folha, rolando só a própria folha. Só vale
+ * para campos: rolar por causa do foco em um botão tiraria o botão de baixo do
+ * dedo no meio do toque. `any` aceita qualquer elemento (navegação por Tab).
+ */
+function reveal(el = document.activeElement, any = false) {
   const panel = openSheet?.panel;
-  if (!panel || !el?.matches?.(FIELD) || !panel.contains(el)) return;
+  if (!panel || !el || el === panel || !panel.contains(el) || !(any || el.matches(FIELD))) return;
   const view = panel.getBoundingClientRect();
   const top = view.top + (panel.querySelector('.sheet-head')?.offsetHeight || 0) + 4;
   const bottom = view.bottom - (keyboardOpen() ? KEYBOARD_GAP : 12);
@@ -150,8 +154,8 @@ document.addEventListener('keydown', (e) => {
     const first = items[0];
     const last = items[items.length - 1];
     const inside = panel.contains(document.activeElement);
-    if (e.shiftKey && (!inside || document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(quiet); reveal(last); }
-    else if (!e.shiftKey && (!inside || document.activeElement === last)) { e.preventDefault(); first.focus(quiet); reveal(first); }
+    if (e.shiftKey && (!inside || document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(quiet); reveal(last, true); }
+    else if (!e.shiftKey && (!inside || document.activeElement === last)) { e.preventDefault(); first.focus(quiet); reveal(first, true); }
   }
 });
 
