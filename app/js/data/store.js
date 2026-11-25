@@ -4,7 +4,7 @@
 import { applyTransaction, revertTransaction } from './ledger.js';
 import { todayISO, isValidISO } from '../core/dates.js';
 import { DEFAULT_REFILL } from '../core/refill.js';
-import { parseInvoiceKey, sanitizeInvoices } from '../core/invoice.js';
+import { parseInvoiceKey, sanitizeInvoices, invoiceDatesOf, validItemDate } from '../core/invoice.js';
 
 const KEY = 'hoje:v1';
 export const SCHEMA_VERSION = 1;
@@ -33,7 +33,8 @@ export function emptyState(today = todayISO()) {
     contributions: [],
     settled: {},
     moved: {}, // datas mudadas de ocorrências: { chave: 'AAAA-MM-DD' }
-    invoices: {}, // faturas de cartão: { chave da ocorrência: { items: [{ id, name, amount }], closed? } }
+    invoices: {}, // faturas de cartão: { chave da ocorrência: { items: [{ id, name, amount, date? }], closed? } }
+    invoiceDates: {}, // cópia dos dias de compra, à prova de aparelho ainda na 2.0.0 (ver core/invoice.js)
     transactions: [],
   };
 }
@@ -74,6 +75,7 @@ export function subscribe(fn) {
 /** Executa uma mutação, salva e avisa a interface. */
 export function commit(mutator) {
   const result = mutator(state);
+  state.invoiceDates = invoiceDatesOf(state.invoices); // a cópia das datas acompanha cada gravação
   save();
   listeners.forEach((fn) => fn(state));
   return result;
@@ -96,7 +98,8 @@ function normalize(data) {
   for (const a of s.accounts) {
     if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('O backup tem uma conta com dados incompletos.');
   }
-  s.invoices = sanitizeInvoices(s.invoices, s.expenses, NAME_MAX);
+  s.invoices = sanitizeInvoices(s.invoices, s.expenses, NAME_MAX, s.invoiceDates);
+  s.invoiceDates = invoiceDatesOf(s.invoices);
   return s;
 }
 
@@ -230,18 +233,6 @@ export function renameTransaction(id, name) {
   });
 }
 
-/** Nomes mais recentes de um tipo de lançamento, sem repetir, para sugerir ao digitar. */
-export function recentNames(type = 'spend', limit = 20) {
-  const seen = new Set();
-  const out = [];
-  for (let i = state.transactions.length - 1; i >= 0 && out.length < limit; i--) {
-    const t = state.transactions[i];
-    const name = t.type === type && t.desc?.trim();
-    if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); out.push(name); }
-  }
-  return out;
-}
-
 export function deleteTransaction(id) {
   return commit((s) => revertTransaction(s, id));
 }
@@ -354,9 +345,20 @@ function invoiceOf(s, key) {
   return s.invoices[key] || null;
 }
 
-function cleanItem({ name, amount } = {}) {
+/** Nome, valor e dia da compra já conferidos. `date` vazio (ou ausente) quer dizer sem data. */
+function cleanItem({ name, amount, date } = {}) {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('Informe o valor.');
-  return { name: String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX), amount };
+  const hasDate = date != null && date !== '';
+  if (hasDate && !validItemDate(date)) throw new Error('Informe uma data válida.');
+  return { name: String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX), amount, date: hasDate ? date : null };
+}
+
+/** Grava os campos conferidos no gasto; sem data, a chave `date` não existe. */
+function writeItem(item, { name, amount, date }) {
+  item.name = name;
+  item.amount = amount;
+  if (date) item.date = date; else delete item.date;
+  return item;
 }
 
 /** Lança um gasto na fatura (o primeiro cria a fatura). `at` é a posição, para desfazer uma remoção. */
@@ -364,7 +366,7 @@ export function addInvoiceItem(key, input, at = null) {
   const clean = cleanItem(input);
   return commit((s) => {
     const inv = invoiceOf(s, key) || { items: [] };
-    const item = { id: newId('it'), ...clean };
+    const item = writeItem({ id: newId('it') }, clean);
     const i = Number.isInteger(at) && at >= 0 && at <= inv.items.length ? at : inv.items.length;
     inv.items.splice(i, 0, item);
     s.invoices[key] = inv;
@@ -372,12 +374,12 @@ export function addInvoiceItem(key, input, at = null) {
   });
 }
 
-/** Troca nome e valor de um gasto. Devolve o gasto, ou null se ele não existe mais. */
+/** Troca nome, valor e dia da compra de um gasto. Devolve o gasto, ou null se ele não existe mais. */
 export function updateInvoiceItem(key, itemId, input) {
   const clean = cleanItem(input);
   return commit((s) => {
     const item = invoiceOf(s, key)?.items.find((x) => x.id === itemId);
-    return item ? Object.assign(item, clean) : null;
+    return item ? writeItem(item, clean) : null;
   });
 }
 
@@ -405,19 +407,4 @@ export function setInvoiceClosed(key, closed) {
     if (closed) inv.closed = true; else delete inv.closed;
     return true;
   });
-}
-
-/** Nomes já usados nas faturas de um cartão, dos mais recentes aos mais antigos, sem repetir. */
-export function invoiceNames(expenseId, limit = 20) {
-  const seen = new Set();
-  const out = [];
-  const keys = Object.keys(state.invoices).filter((k) => parseInvoiceKey(k)?.expenseId === expenseId).sort().reverse();
-  for (const k of keys) {
-    const items = state.invoices[k].items;
-    for (let i = items.length - 1; i >= 0 && out.length < limit; i--) {
-      const name = items[i].name;
-      if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); out.push(name); }
-    }
-  }
-  return out;
 }

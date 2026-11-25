@@ -1,13 +1,13 @@
 // Formulários (em folha modal) e listas editáveis de contas, receitas,
 // despesas fixas, metas e aportes. Usados no assistente inicial e em Ajustes.
 
-import { h, sheet, closeSheet, toast, confirmDialog, afterSheetClosed, joinList, amount as moneyText } from './dom.js';
+import { h, sheet, closeSheet, toast, confirmDialog, afterSheetClosed, joinList, focusField, centerInSheet, fitText, amount as moneyText } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
 import { formatBRL, formatBRLShort, formatSigned, formatPercent, parseBRL, toInput } from '../core/money.js';
 import { todayISO, formatDayMonth, formatMonth, shiftMonth, monthKey, relative, isValidISO, addDays, TIME_ZONE } from '../core/dates.js';
 import { MAX_MOVE_DAYS, occurrenceByKey, currentInvoices } from '../core/schedule.js';
-import { invoiceKey, parseInvoiceKey } from '../core/invoice.js';
+import { invoiceKey, parseInvoiceKey, sortInvoiceItems, validItemDate, ITEM_DATE_MIN, ITEM_DATE_MAX } from '../core/invoice.js';
 import { computeDailyBudget, withDelta } from '../core/budget.js';
 import { suggestRefill } from '../core/refill.js';
 import { SAVINGS, openSavings, suggestSaving } from '../core/savings.js';
@@ -15,11 +15,37 @@ import { SAVINGS, openSavings, suggestSaving } from '../core/savings.js';
 // ---------- campos ----------
 
 export function field(label, input, hint) {
-  const control = input.dataset?.money ? h('span', { class: 'money' }, input) : input;
+  const control = input.dataset?.money ? h('span', { class: 'money' }, input) : input.type === 'date' ? dateBox(input) : input;
   return h('label', { class: 'field' },
     h('span', { class: 'field-label' }, label),
     control,
     hint && h('span', { class: 'field-hint' }, hint));
+}
+
+/**
+ * Campo de data com o texto no formato do app ("8 de nov"). No telefone esse
+ * texto fica por cima do campo nativo, que tem o próprio escondido: o do iPhone
+ * é longo ("8 de nov. de 2026" não cabe em meia coluna) e some quando o campo
+ * está vazio. O toque continua abrindo o calendário do sistema. `data-empty`
+ * no campo troca o texto de quando não há data.
+ */
+function dateBox(input) {
+  const text = h('span', { class: 'date-text', 'aria-hidden': 'true', 'data-fit': true });
+  const box = h('span', { class: 'date' }, input, text);
+  const sync = () => {
+    const filled = isValidISO(input.value);
+    text.textContent = filled ? formatDayMonth(input.value, yearOf(todayISO())) : input.dataset.empty || 'Escolher';
+    text.classList.toggle('empty', !filled);
+    // data pela metade (um trecho apagado): os dígitos precisam aparecer, não "Sem data"
+    if (input.validity?.badInput) box.classList.add('typed');
+    if (box.isConnected) fitText(box); // data de outro ano em meia coluna: a letra encolhe em vez de cortar
+  };
+  input.addEventListener('input', sync);
+  input.addEventListener('change', sync);
+  // quem digita a data (tablet com teclado) precisa ver os dígitos: volta o campo nativo
+  input.addEventListener('keydown', (e) => { if (e.key.length === 1) box.classList.add('typed'); });
+  sync();
+  return box;
 }
 
 export function moneyInput(cents, attrs = {}) {
@@ -29,9 +55,22 @@ export function moneyInput(cents, attrs = {}) {
   });
 }
 
+/**
+ * Campo de texto livre. Sem autocomplete="off" e sem <datalist>: no iPhone o
+ * primeiro desliga as previsões do teclado e o segundo toma o lugar das
+ * sugestões de palavras (e abre uma lista por cima do formulário).
+ */
 function textInput(value, attrs = {}) {
-  return h('input', { type: 'text', value: value ?? '', autocomplete: 'off', autocapitalize: 'sentences', ...attrs });
+  return h('input', { type: 'text', value: value ?? '', autocapitalize: 'sentences', ...attrs });
 }
+
+/**
+ * Atributos do primeiro campo de um formulário de edição, em aparelho de toque:
+ * o teclado não abre sozinho, porque quem abre uma ficha pronta costuma querer só
+ * conferir ou trocar um detalhe. Em cadastro novo (e no computador, onde não há
+ * teclado na tela) o campo recebe o foco.
+ */
+const waitForTap = (isNew) => (isNew || !window.matchMedia?.('(pointer: coarse)').matches ? {} : { 'data-noautofocus': '1' });
 
 function numberInput(value, attrs = {}) {
   return h('input', { type: 'text', inputmode: 'numeric', pattern: '[0-9]*', value: value ?? '', ...attrs });
@@ -105,7 +144,8 @@ export function fail(box, msg, input) {
     input.setAttribute('aria-invalid', 'true');
     input.setAttribute('aria-describedby', box.id);
     box._input = input;
-    input.focus();
+    // dentro da folha, o foco não deixa o navegador rolar a página; fora dela, rola até o campo
+    if (input.closest('.sheet')) focusField(input); else input.focus();
     input.addEventListener('input', () => {
       if (box._input !== input) return;
       input.removeAttribute('aria-invalid');
@@ -146,7 +186,7 @@ const KIND_HINT = {
 export function editAccount(account, { draft, kind: presetKind, onSaved } = {}) {
   const isNew = !account;
   const a = account || { name: '', kind: presetKind || 'spending', balance: 0, ...draft };
-  const name = textInput(a.name, { placeholder: 'Ex.: Conta corrente' });
+  const name = textInput(a.name, { placeholder: 'Ex.: Conta corrente', ...waitForTap(isNew) });
   const kindHint = h('span', { class: 'field-hint' }, KIND_HINT[a.kind]);
   const kind = segmented([['spending', 'De gasto'], ['goal', 'De meta']], a.kind, (v) => { kindHint.textContent = KIND_HINT[v]; });
   const balance = moneyInput(isNew ? null : a.balance);
@@ -236,7 +276,7 @@ export function editIncome(income, { draft, onSaved } = {}) {
   };
   const onceDate = dateInput(i.rule.type === 'once' ? i.rule.date : addDays(today, 1), { min: today, 'data-noautofocus': '1' });
   const onceRow = field('Data', onceDate, 'Entra no limite do dia a partir dessa data.');
-  const name = textInput(i.name, { placeholder: 'Ex.: Salário' });
+  const name = textInput(i.name, { placeholder: 'Ex.: Salário', ...waitForTap(isNew) });
   const amount = moneyInput(i.amount);
   const account = select(accountOptions(state), i.accountId);
   const n = numberInput(i.rule.type === 'businessDay' ? i.rule.n : 5, { maxlength: 2, 'aria-label': 'Qual dia útil' });
@@ -310,7 +350,7 @@ export function editExpense(expense) {
   if (!spending.length) return toast('Cadastre uma conta de gasto antes.');
   const isNew = !expense;
   const e = expense || { name: '', amount: null, accountId: state.settings.defaultAccountId, day: 10, exceptions: {}, since: todayISO() };
-  const name = textInput(e.name, { placeholder: 'Ex.: Fatura do cartão' });
+  const name = textInput(e.name, { placeholder: 'Ex.: Fatura do cartão', ...waitForTap(isNew) });
   const amount = moneyInput(e.amount);
   const account = select(spending, e.accountId);
   const day = numberInput(e.day, { maxlength: 2, 'aria-label': 'Dia do vencimento' });
@@ -366,7 +406,7 @@ export function editGoal(goal) {
   }
   const isNew = !goal;
   const g = goal || { name: '', target: null, deadline: '', accountId: goalAccounts[0][0] };
-  const name = textInput(g.name, { placeholder: 'Ex.: Viagem' });
+  const name = textInput(g.name, { placeholder: 'Ex.: Viagem', ...waitForTap(isNew) });
   const target = moneyInput(g.target);
   const deadline = dateInput(g.deadline);
   const account = select(goalAccounts, g.accountId);
@@ -393,7 +433,7 @@ export function editContribution(contribution, goalId) {
   const isNew = !contribution;
   const c = contribution || { goalId, amount: null, date: todayISO(), fromAccountId: state.settings.defaultAccountId };
   const goal = state.goals.find((x) => x.id === c.goalId);
-  const amount = moneyInput(c.amount);
+  const amount = moneyInput(c.amount, waitForTap(isNew));
   const date = dateInput(c.date);
   const from = select(accountOptions(state, 'spending'), c.fromAccountId);
   const err = errorBox();
@@ -726,20 +766,13 @@ export const TX_LABEL = {
 };
 const txTime = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: TIME_ZONE });
 
-/** <datalist> com os nomes já usados em gastos ou receitas (sugestões ao digitar). */
-export function nameList(id, type = 'spend') {
-  return h('datalist', { id }, store.recentNames(type).map((n) => h('option', { value: n })));
-}
-
 /** Ficha de um lançamento: mostra valor e origem, permite renomear e excluir. */
 export function transactionSheet(t) {
   const label = TX_LABEL[t.type] || 'Lançamento';
   const isSpend = t.type === 'spend';
-  const suggest = isSpend || t.type === 'income';
-  const listId = 'nomes-ficha';
   const name = textInput(t.desc || '', {
     placeholder: isSpend ? 'Ex.: Mercado, Almoço' : t.type === 'income' ? 'Ex.: Freela, Venda' : label, maxlength: store.NAME_MAX,
-    list: suggest ? listId : null, enterkeyhint: 'done', 'data-noautofocus': '1',
+    enterkeyhint: 'done', 'data-noautofocus': '1',
   });
   const acc = (id) => store.getAccount(id)?.name ?? 'conta excluída';
   const isMove = t.type === 'transfer' || t.type === 'contribution';
@@ -758,7 +791,6 @@ export function transactionSheet(t) {
     h('span', { class: 'stat-label' }, `${when}, ${where}`),
     moneyText(formatBRL(Math.abs(t.amount)), `lg ${t.type === 'income' ? 'pos' : ''}`, { 'data-fit': true })),
   field('Nome', name),
-  suggest && nameList(listId, t.type),
   savedOf > 0 && h('p', { class: 'field-hint' }, `Poupança desta receita: ${formatBRL(savedOf)}.`),
   actions(async () => {
     const title = isSpend ? 'Excluir gasto?' : 'Excluir movimentação?';
@@ -794,7 +826,7 @@ export function invoiceSheet(key, { scroll, focus } = {}) {
   const exp = state.expenses.find((e) => e.id === p.expenseId);
   const paid = state.settled[key] || null;
   const inv = occ.invoice;
-  const items = state.invoices[key]?.items || [];
+  const items = sortInvoiceItems(state.invoices[key]?.items);
 
   // meses vizinhos: só os que têm ocorrência, até 12 meses à frente
   const floor = monthKey(exp.since || state.createdAt || today);
@@ -842,8 +874,10 @@ export function invoiceSheet(key, { scroll, focus } = {}) {
     invoiceSheet(key, { scroll: document.querySelector('.sheet')?.scrollTop, focus: '.switch input' });
   });
 
-  const row = (it) => h('li', {}, h('button', { class: 'list-item', onclick: () => invoiceItemSheet(key, it) },
-    h('span', { class: 'li-main' }, h('span', { class: `li-title ${it.name ? '' : 'muted'}` }, it.name || 'Gasto')),
+  const row = (it) => h('li', { 'data-item': it.id }, h('button', { class: 'list-item', onclick: () => invoiceItemSheet(key, it) },
+    h('span', { class: 'li-main' },
+      h('span', { class: `li-title ${it.name ? '' : 'muted'}` }, it.name || 'Gasto'),
+      it.date && h('span', { class: 'li-sub' }, formatDayMonth(it.date, ref))),
     h('span', { class: 'li-end' }, h('span', { class: 'li-value' }, formatBRL(it.amount)), icon('chevron', { size: 18, cls: 'chev' }))));
   const rest = !paid && inv.rest > 0 && h('li', {}, h('div', { class: 'row-item' },
     h('span', { class: 'li-main' }, h('span', { class: 'li-title muted' }, 'Resto do previsto')),
@@ -874,34 +908,51 @@ export function invoiceSheet(key, { scroll, focus } = {}) {
     paid && !paid.skipped && h('p', { class: 'field-hint' }, 'Para desfazer o pagamento, exclua a movimentação em Contas.'),
   ]);
   const panel = document.querySelector('.sheet');
-  if (scroll === 'add') panel.querySelector('[data-add]')?.scrollIntoView({ block: 'center' });
-  else if (scroll != null) panel.scrollTop = scroll;
+  // de volta de um gasto: ele fica à vista (a lista é ordenada por data, então pode
+  // estar longe do botão); se sumiu, vale o botão de adicionar
+  if (scroll && typeof scroll === 'object') {
+    const saved = [...panel.querySelectorAll('[data-item]')].find((li) => li.dataset.item === scroll.item);
+    centerInSheet(saved || panel.querySelector('[data-add]'));
+  } else if (scroll != null) panel.scrollTop = scroll;
   // a folha é refeita a cada troca: devolve o foco ao controle usado (ou ao mês, se ele sumiu)
   if (focus) (panel.querySelector(focus) || panel.querySelector('.month-nav .li-title'))?.focus({ preventScroll: true });
 }
 
-/** Um gasto da fatura: nome e valor. Em gasto novo dá para salvar e já lançar o próximo. */
+/**
+ * Um gasto da fatura: nome, valor e dia da compra (opcional). Gasto novo sugere
+ * hoje, menos em fatura já paga, pulada ou vencida, onde a compra não pode ser de hoje.
+ * Em gasto novo dá para salvar e já lançar o próximo, que herda a data do anterior.
+ * Fechar esta folha (X, toque fora, Esc, voltar) devolve à fatura.
+ */
 function invoiceItemSheet(key, item) {
   const state = store.getState();
+  const today = todayISO();
   const p = parseInvoiceKey(key);
   const exp = state.expenses.find((e) => e.id === p.expenseId);
+  const occ = occurrenceByKey(state, key);
+  const past = !!state.settled[key] || (occ ? occ.date < today : false);
   const isNew = !item;
-  let added = 0;
-  const listId = 'nomes-fatura';
+  /** Onde a fatura estava rolada, para voltar ao mesmo lugar quando nada foi salvo. */
+  const from = document.querySelector('.sheet')?.scrollTop ?? 0;
+  /** O último gasto salvo aqui: é ele que a fatura mostra na volta. */
+  let last = null;
   const value = moneyInput(item?.amount ?? null);
+  const date = dateInput(isNew ? (past ? '' : today) : item.date || '', { min: ITEM_DATE_MIN, max: ITEM_DATE_MAX, 'data-empty': 'Sem data' });
   const name = textInput(item?.name, {
-    placeholder: 'Ex.: Mercado, Assinatura', maxlength: store.NAME_MAX, list: listId, enterkeyhint: 'next',
-    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); value.focus(); } },
+    placeholder: 'Ex.: Mercado, Assinatura', maxlength: store.NAME_MAX, enterkeyhint: 'next', ...waitForTap(isNew),
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); focusField(value); } },
   });
   const lead = h('p', { class: 'sheet-lead', 'aria-live': 'polite' }, `${exp?.name ?? 'Cartão'}, ${formatMonth(p.month)}.`);
   const err = errorBox();
-  const back = (scroll) => invoiceSheet(key, { scroll });
-  /** Salva o que está no formulário; devolve o gasto, false (valor inválido) ou null (fatura sumiu). */
+  const back = (scroll = last ? { item: last.id } : from) => invoiceSheet(key, { scroll });
+  /** Salva o que está no formulário; devolve o gasto, false (campo inválido) ou null (fatura sumiu). */
   const save = () => {
     const v = parseBRL(value.value);
     if (!Number.isSafeInteger(v) || v <= 0) return fail(err, 'Informe o valor.', value);
+    // campo de data pela metade (dia sem ano) chega vazio, mas o navegador avisa em validity
+    if (date.validity?.badInput || (date.value && !validItemDate(date.value))) return fail(err, 'Data inválida.', date);
     try {
-      const input = { name: name.value, amount: v };
+      const input = { name: name.value, amount: v, date: date.value };
       const saved = isNew ? store.addInvoiceItem(key, input) : store.updateInvoiceItem(key, item.id, input);
       if (!saved) throw new Error('Este gasto não existe mais.');
       return saved;
@@ -909,48 +960,50 @@ function invoiceItemSheet(key, item) {
   };
   const isEmpty = () => !name.value.trim() && !value.value.trim();
   const again = () => {
-    if (added && isEmpty()) return name.focus(); // toque repetido: nada a salvar
+    if (last && isEmpty()) return focusField(name); // toque repetido: nada a salvar
     const saved = save();
     if (!saved) return;
-    added++;
+    last = saved;
     const sum = occurrenceByKey(store.getState(), key)?.invoice.sum ?? 0;
-    lead.textContent = `${saved.name ? `${saved.name}: gasto lançado` : 'Gasto lançado'}. Os gastos somam ${formatBRL(sum)}.`;
+    lead.textContent = `Lançado. Os gastos somam ${formatBRL(sum)}.`; // curto: cabe em uma linha e o formulário não se mexe
     err.textContent = '';
     name.value = '';
     value.value = '';
-    name.focus();
+    focusField(name); // a data fica: quem copia a fatura costuma lançar vários gastos do mesmo dia
   };
   sheet(isNew ? 'Novo gasto' : 'Editar gasto', () => form(() => {
     // depois de "Salvar e novo", salvar com o formulário vazio só volta para a fatura
-    if (added && isEmpty()) return back('add');
-    if (save()) back(isNew ? 'add' : undefined);
+    if (last && isEmpty()) return back();
+    const saved = save();
+    if (saved) back({ item: saved.id });
   },
   lead,
   field('Nome', name),
-  field('Valor', value),
-  h('datalist', { id: listId }, store.invoiceNames(p.expenseId).map((n) => h('option', { value: n }))),
+  h('div', { class: 'field-row' }, field('Valor', value), field('Data', date)),
   err,
   h('div', { class: 'form-actions' },
     isNew
-      ? h('button', { type: 'button', class: 'btn', onclick: again }, 'Salvar e novo')
+      // sem tirar o foco do campo no toque: o teclado fica aberto para o próximo gasto
+      ? h('button', { type: 'button', class: 'btn', onmousedown: (e) => e.preventDefault(), onclick: again }, 'Salvar e novo')
       : h('button', {
         type: 'button', class: 'btn danger-text',
         onclick: () => {
           let gone;
           try { gone = store.removeInvoiceItem(key, item.id); } catch (e) { return invoiceGone(e); }
-          back();
+          back(from);
           if (!gone) return;
           toast('Gasto removido', {
             label: 'Desfazer',
             run: () => {
+              let restored;
               try {
-                store.addInvoiceItem(key, gone.item, gone.index);
+                restored = store.addInvoiceItem(key, gone.item, gone.index);
                 if (gone.closed) store.setInvoiceClosed(key, true);
               } catch (e) { return invoiceGone(e); }
-              back();
+              back({ item: restored.id });
             },
           });
         },
       }, icon('trash', { size: 20 }), 'Excluir'),
-    h('button', { type: 'submit', class: 'btn primary' }, 'Salvar'))));
+    h('button', { type: 'submit', class: 'btn primary' }, 'Salvar'))), { onDismiss: () => back() });
 }
