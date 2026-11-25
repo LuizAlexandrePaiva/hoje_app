@@ -8,14 +8,14 @@ import { computeDailyBudget, computeTomorrowBudget, withDelta } from '../../core
 import { suggestRefill } from '../../core/refill.js';
 import { todayISO, addDays, formatDayMonth } from '../../core/dates.js';
 import { refillSheet } from './today.js';
-import { nameList, editIncome } from '../editors.js';
+import { editIncome } from '../editors.js';
 
 const MAX_DIGITS = 9;
 let cameFrom = '#/hoje'; // tela de onde o lançamento foi aberto; fechar volta para ela
 
 const MODES = {
-  spend: { label: 'Gasto', account: 'Sai de', placeholder: 'Nome do gasto (opcional)', list: 'nomes-gastos' },
-  income: { label: 'Receita', account: 'Entra em', placeholder: 'Nome da receita (opcional)', list: 'nomes-receitas' },
+  spend: { label: 'Gasto', account: 'Sai de', placeholder: 'Nome do gasto (opcional)' },
+  income: { label: 'Receita', account: 'Entra em', placeholder: 'Nome da receita (opcional)' },
 };
 
 function warnNegative(accountId, undo) {
@@ -60,8 +60,7 @@ export function renderSpend(ctx) {
   const display = h('p', { class: 'amount amount-display', 'aria-live': 'polite', 'data-fit': true });
   const hint = h('p', { class: 'amount-hint' });
   const desc = h('input', {
-    type: 'text', maxlength: store.NAME_MAX, autocomplete: 'off',
-    autocapitalize: 'sentences', enterkeyhint: 'done',
+    type: 'text', maxlength: store.NAME_MAX, autocapitalize: 'sentences', enterkeyhint: 'done',
   });
   const scheduleBtn = h('button', {
     class: 'btn small schedule-btn', 'aria-label': 'Agendar para outro dia', onclick: schedule,
@@ -85,7 +84,6 @@ export function renderSpend(ctx) {
     confirmBtn.textContent = v > 0 ? `Lançar ${formatBRL(v)}` : 'Digite o valor';
     desc.placeholder = m.placeholder;
     desc.setAttribute('aria-label', m.placeholder.replace(' (opcional)', ''));
-    desc.setAttribute('list', m.list);
     accountLabel.textContent = m.account;
     scheduleBtn.hidden = mode !== 'income';
     if (mode === 'income') {
@@ -207,9 +205,7 @@ export function renderSpend(ctx) {
     h('div', { class: 'amount-area' }, display, hint),
     h('div', { class: 'spend-opts' },
       chips && h('div', { class: 'row gap' }, accountLabel, chips),
-      h('div', { class: 'row gap-sm' }, desc, scheduleBtn),
-      nameList(MODES.spend.list, 'spend'),
-      nameList(MODES.income.list, 'income')),
+      h('div', { class: 'row gap-sm' }, desc, scheduleBtn)),
     pad,
     confirmBtn);
 }

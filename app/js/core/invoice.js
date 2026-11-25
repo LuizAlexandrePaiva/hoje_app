@@ -1,7 +1,10 @@
 // Fatura de cartão: os gastos discriminados de UMA ocorrência de despesa fixa
 // marcada como cartão. Mora em state.invoices[chave da ocorrência]; guardamos
 // só os itens e se a fatura está fechada. Soma, total e resto são calculados.
+// Cada gasto tem nome, valor e, se o dono quiser, o dia da compra (`date`).
 // Funções puras, sem DOM e sem armazenamento.
+
+import { isValidISO } from './dates.js';
 
 const KEY_RE = /^expense:(.+):(\d{4}-(?:0[1-9]|1[0-2]))$/;
 
@@ -16,6 +19,27 @@ export function parseInvoiceKey(key) {
 }
 
 const validAmount = (v) => Number.isSafeInteger(v) && v > 0;
+
+/** Faixa aceita para o dia da compra: barra ano digitado pela metade ("0202"). */
+export const ITEM_DATE_MIN = '2000-01-01';
+export const ITEM_DATE_MAX = '2099-12-31';
+
+/** O dia da compra é opcional; quando vem, é uma data de verdade dentro da faixa. */
+export function validItemDate(v) {
+  return isValidISO(v) && v >= ITEM_DATE_MIN && v <= ITEM_DATE_MAX;
+}
+
+/**
+ * Gastos na ordem em que aparecem na fatura: primeiro os sem data, na ordem em
+ * que foram lançados; depois por dia da compra, do mais antigo ao mais recente
+ * (no mesmo dia, vale a ordem de lançamento). Não altera a lista recebida.
+ */
+export function sortInvoiceItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => ({ item, index, date: validItemDate(item?.date) ? item.date : '' }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.index - b.index))
+    .map((x) => x.item);
+}
 
 /**
  * Resumo da fatura de um mês. `estimate` é o valor previsto da despesa no mês
@@ -40,7 +64,7 @@ export function invoiceSummary(estimate, invoice) {
 /**
  * Lê state.invoices de qualquer backup e devolve um mapa íntegro: só chaves de
  * despesas que existem, itens com id único e valor inteiro positivo, nenhuma
- * fatura vazia. `nameMax` corta nomes longos.
+ * fatura vazia. `nameMax` corta nomes longos; data inválida some (o gasto fica).
  */
 export function sanitizeInvoices(raw, expenses = [], nameMax = 60) {
   const out = {};
@@ -56,7 +80,9 @@ export function sanitizeInvoices(raw, expenses = [], nameMax = 60) {
       let id = typeof it.id === 'string' && it.id ? it.id : '';
       for (let n = items.length; !id || seen.has(id); n++) id = `it_${n}`;
       seen.add(id);
-      items.push({ id, name: String(it.name ?? '').replace(/\s+/g, ' ').trim().slice(0, nameMax), amount: it.amount });
+      const item = { id, name: String(it.name ?? '').replace(/\s+/g, ' ').trim().slice(0, nameMax), amount: it.amount };
+      if (validItemDate(it.date)) item.date = it.date;
+      items.push(item);
     }
     if (!items.length) continue;
     out[key] = inv.closed === true ? { items, closed: true } : { items };

@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { scenario, TODAY } from './fixtures.js';
-import { invoiceKey, parseInvoiceKey, invoiceSummary, sanitizeInvoices } from '../app/js/core/invoice.js';
+import { invoiceKey, parseInvoiceKey, invoiceSummary, sanitizeInvoices, validItemDate, sortInvoiceItems } from '../app/js/core/invoice.js';
 import { expandOccurrences, openEvents, occurrenceByKey, currentInvoices } from '../app/js/core/schedule.js';
 import { computeDailyBudget } from '../app/js/core/budget.js';
 import { suggestRefill } from '../app/js/core/refill.js';
@@ -200,6 +200,51 @@ test('sanitizeInvoices: backup sujo vira mapa íntegro', () => {
   assert.equal(sanitizeInvoices({ [K]: { items: [{ id: 'x', name: 'n'.repeat(100), amount: 1 }] } }, exps)[K].items[0].name.length, 60);
 });
 
+test('dia da compra: opcional, mas quando vem é uma data de verdade', () => {
+  for (const ok of ['2026-10-08', '2024-02-29', '2000-01-01', '2099-12-31']) assert.equal(validItemDate(ok), true, ok);
+  for (const bad of ['', null, undefined, 20261008, '08/10/2026', '2026-10-8', '2026-02-30', '2025-02-29', '2026-13-01', '0202-10-08', '1999-12-31', '2100-01-01', '2026-10-08T12:00']) {
+    assert.equal(validItemDate(bad), false, String(bad));
+  }
+});
+
+test('ordem dos gastos na fatura: sem data primeiro, depois do dia mais antigo ao mais recente', () => {
+  const list = [
+    { id: 'a', name: 'Posto', amount: 1, date: '2026-10-12' },
+    { id: 'b', name: 'Sem data 1', amount: 1 },
+    { id: 'c', name: 'Mercado', amount: 1, date: '2026-09-30' },
+    { id: 'd', name: 'Padaria', amount: 1, date: '2026-10-12' },
+    { id: 'e', name: 'Sem data 2', amount: 1, date: 'ontem' }, // data inválida conta como sem data
+    { id: 'f', name: 'Farmácia', amount: 1, date: '2026-10-01' },
+  ];
+  const before = structuredClone(list);
+  assert.deepEqual(sortInvoiceItems(list).map((i) => i.id), ['b', 'e', 'c', 'f', 'a', 'd']);
+  assert.deepEqual(list, before); // não mexe na lista guardada
+  assert.deepEqual(sortInvoiceItems(items(1, 2, 3)).map((i) => i.id), ['i0', 'i1', 'i2']); // sem datas, a ordem de lançamento
+  for (const bad of [undefined, null, 'x', 5]) assert.deepEqual(sortInvoiceItems(bad), []);
+});
+
+test('sanitizeInvoices: guarda o dia da compra válido e descarta só a data ruim', () => {
+  const exps = [{ id: 'fatura' }];
+  const out = sanitizeInvoices({
+    [K]: { items: [
+      { id: 'a', name: 'Mercado', amount: 100, date: '2026-10-08' },
+      { id: 'b', name: 'Posto', amount: 200, date: '08/10/2026' },
+      { id: 'c', name: 'Padaria', amount: 300, date: '2026-02-30' },
+      { id: 'd', name: 'Farmácia', amount: 400, date: null },
+      { id: 'e', name: 'Livraria', amount: 500, date: 20261008 },
+    ] },
+  }, exps);
+  assert.deepEqual(out[K].items, [
+    { id: 'a', name: 'Mercado', amount: 100, date: '2026-10-08' },
+    { id: 'b', name: 'Posto', amount: 200 },
+    { id: 'c', name: 'Padaria', amount: 300 },
+    { id: 'd', name: 'Farmácia', amount: 400 },
+    { id: 'e', name: 'Livraria', amount: 500 },
+  ]);
+  assert.deepEqual(sanitizeInvoices(out, exps), out); // idempotente
+  assert.equal(invoiceSummary(100000, out[K]).sum, 1500); // a data não entra na conta
+});
+
 // ---------- store ----------
 
 function boot(invoice) {
@@ -348,14 +393,51 @@ test('store: exportar e importar preserva faturas; importação suja é limpa', 
   assert.equal(limit(store.getState()), 15207);
 });
 
-test('store: sugestões de nome por cartão, mais recentes primeiro, sem repetir', () => {
-  store.addInvoiceItem(K, { name: 'Mercado', amount: 1 });
-  store.addInvoiceItem(K, { name: 'Posto', amount: 1 });
-  store.addInvoiceItem(K11, { name: 'mercado', amount: 1 });
-  store.addInvoiceItem(K11, { name: '', amount: 1 });
-  store.addInvoiceItem(K11, { name: 'Farmácia', amount: 1 });
-  assert.deepEqual(store.invoiceNames('fatura'), ['Farmácia', 'mercado', 'Posto']);
-  assert.deepEqual(store.invoiceNames('outro'), []);
+test('store: dia da compra em cada gasto (lançar, trocar, tirar, desfazer)', () => {
+  const before = limit(store.getState());
+  const a = store.addInvoiceItem(K, { name: 'Mercado', amount: 12050, date: '2026-10-08' });
+  assert.deepEqual(a, { id: a.id, name: 'Mercado', amount: 12050, date: '2026-10-08' });
+  const b = store.addInvoiceItem(K, { name: 'Posto', amount: 990, date: '' });
+  assert.equal('date' in b, false); // sem data, a chave nem existe
+  assert.equal('date' in store.addInvoiceItem(K, { name: 'Padaria', amount: 500, date: null }), false);
+  assert.equal(JSON.parse(mem.get('hoje:v1')).invoices[K].items[0].date, '2026-10-08'); // salvo no aparelho
+  // trocar e tirar a data
+  assert.equal(store.updateInvoiceItem(K, a.id, { name: 'Mercado', amount: 12050, date: '2026-10-09' }).date, '2026-10-09');
+  assert.equal(store.updateInvoiceItem(K, b.id, { name: 'Posto', amount: 990, date: '2026-09-30' }).date, '2026-09-30');
+  const cleared = store.updateInvoiceItem(K, a.id, { name: 'Mercado', amount: 12050, date: '' });
+  assert.deepEqual(cleared, { id: a.id, name: 'Mercado', amount: 12050 });
+  assert.equal('date' in store.getState().invoices[K].items[0], false);
+  // data ruim não salva nada
+  const saved = mem.get('hoje:v1');
+  for (const bad of ['08/10/2026', '2026-02-30', '0202-10-08', 20261008, 'ontem']) {
+    assert.throws(() => store.addInvoiceItem(K, { name: 'x', amount: 100, date: bad }), /data válida/);
+    assert.throws(() => store.updateInvoiceItem(K, b.id, { name: 'x', amount: 100, date: bad }), /data válida/);
+  }
+  assert.equal(mem.get('hoje:v1'), saved);
+  // remover e desfazer devolve o gasto com a data
+  const gone = store.removeInvoiceItem(K, b.id);
+  assert.equal(gone.item.date, '2026-09-30');
+  store.addInvoiceItem(K, gone.item, gone.index);
+  assert.deepEqual(store.getState().invoices[K].items.map((i) => [i.name, i.date]), [['Mercado', undefined], ['Posto', '2026-09-30'], ['Padaria', undefined]]);
+  // a data é só registro: o limite depende dos valores, não dos dias
+  assert.equal(limit(store.getState()), before);
+  store.updateInvoiceItem(K, a.id, { name: 'Mercado', amount: 12050, date: '2026-10-20' });
+  assert.equal(limit(store.getState()), before);
+});
+
+test('store: backup com datas nos gastos vai e volta igual', () => {
+  store.addInvoiceItem(K, { name: 'Mercado', amount: 12050, date: '2026-10-08' });
+  store.addInvoiceItem(K, { name: 'Posto', amount: 990 });
+  const want = structuredClone(store.getState().invoices);
+  const json = store.exportJSON();
+  boot();
+  store.importJSON(json);
+  assert.deepEqual(store.getState().invoices, want);
+  // data estragada no arquivo: o gasto entra sem data
+  const dirty = JSON.parse(json);
+  dirty.invoices[K].items[0].date = '2026-10-32';
+  store.importJSON(JSON.stringify(dirty));
+  assert.deepEqual(store.getState().invoices[K].items.map((i) => [i.name, i.amount, i.date]), [['Mercado', 12050, undefined], ['Posto', 990, undefined]]);
 });
 
 test('transferência não muda o limite, com fatura aberta ou fechada', () => {

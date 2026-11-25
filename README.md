@@ -52,13 +52,13 @@ O app foi feito para uso com uma mão no celular: um número grande, o botão de
 ## Funcionalidades
 
 - **Quanto resta hoje:** o número em destaque é o que ainda pode ser gasto hoje, com uma barra que esvazia conforme o limite é usado. Logo abaixo aparece o limite de amanhã, que sobe quando sobra dinheiro hoje e cai quando o gasto passa do limite. Receita do dia ou atrasada só libera gasto depois de confirmada. Um toque no ícone de informação mostra a conta que leva ao limite.
-- **Lançamento rápido de gastos e receitas:** o botão **+** fica na barra de abas, em todas as telas. Teclado numérico, só o valor; nome e conta são opcionais. Uma receita lançada entra no saldo na hora e aumenta o limite do dia. O nome sugere os já usados e pode ser trocado depois, tocando no lançamento.
+- **Lançamento rápido de gastos e receitas:** o botão **+** fica na barra de abas, em todas as telas. Teclado numérico, só o valor; nome e conta são opcionais. Uma receita lançada entra no saldo na hora e aumenta o limite do dia. O nome pode ser trocado depois, tocando no lançamento.
 - **Resgates planejados:** mostra quantos dias o saldo da conta de gastos cobre e sugere quanto resgatar da reserva (por exemplo, um CDB de liquidez diária), arredondado e limitado ao saldo disponível. Também sugere aplicar o excedente quando sobra dinheiro.
 - **Receitas recorrentes e únicas:** dia fixo ou Nº dia útil do mês, com feriados nacionais (Sexta-feira Santa calculada pela Páscoa), opção de contar sábado e valor diferente em meses específicos. Receitas que acontecem uma única vez podem ser agendadas para uma data e entram no cálculo a partir dela.
 - **Confirmação de entradas e saídas:** receitas, contas e aportes só mexem no saldo quando você confirma. Dá para confirmar antes da data, mudar a data de uma ocorrência ou marcar que não aconteceu.
 - **Linha do tempo:** uma única linha, em SVG próprio, com o saldo previsto se você gastar o limite de cada dia, até um mês depois do próximo salário. O limite de cada dia futuro é refeito pela mesma conta que o app fará no dia. Tocar no gráfico mostra o saldo e os eventos de cada dia; abaixo fica a lista cronológica do que está por vir.
 - **Contas:** saldos, uso de cada conta (gastos do dia, reserva ou nenhum), ajuste manual para conferir com o banco, transferências (que não contam como gasto) e movimentações agrupadas por dia.
-- **Fatura de cartão:** uma despesa fixa marcada como cartão ganha uma fatura por mês, com os gastos discriminados (nome e valor), todos editáveis. Fica na aba Contas, em Cartões. Os gastos não saem do saldo; só o pagamento da fatura sai.
+- **Fatura de cartão:** uma despesa fixa marcada como cartão ganha uma fatura por mês, com os gastos discriminados (nome, valor e, se quiser, o dia da compra), todos editáveis. Fica na aba Contas, em Cartões. Os gastos não saem do saldo; só o pagamento da fatura sai.
 - **Poupança sugerida:** a cada receita, o app calcula quanto dá para guardar, até 10% do que entrou, sem apertar os seus dias. Guardar é registrar uma transferência para uma conta de meta, fora do limite.
 - **Metas:** progresso, prazo e aportes planejados.
 - **Ajustes:** receitas, despesas fixas, margem de segurança do limite, parâmetros de resgate, poupança e dados (backup na nuvem, exportar, importar). Abre pelo ícone no topo da tela Hoje. Cada informação mora em um lugar só.
@@ -110,7 +110,7 @@ O cálculo é uma função pura, `computeDailyBudget(state, hoje)`, em [`app/js/
 - Fatura fechada: a soma dos gastos.
 - Paga ou pulada: nada, como qualquer ocorrência confirmada.
 
-Os gastos da fatura não mexem em saldo nem contam como gasto do dia.
+Os gastos da fatura não mexem em saldo nem contam como gasto do dia. O dia da compra é só registro: ordena a lista (primeiro os gastos sem data, depois do mais antigo ao mais recente) e não entra em nenhuma conta.
 
 **Sugestão de resgate** ([`app/js/core/refill.js`](app/js/core/refill.js)): `limite × dias desejados + compromissos da conta no período − saldo atual`, arredondado para cima em múltiplos de R$ 50 e limitado ao saldo da reserva. Se uma receita cair na conta antes do fim do período, o resgate cobre só até ela.
 
@@ -185,6 +185,8 @@ hoje_app/
 
 - A lógica de negócio em `app/js/core/` é pura e determinística: recebe o estado e a data, devolve números. Nada nela acessa DOM, armazenamento ou relógio.
 - A interface é renderizada a partir do estado a cada mudança, sem framework.
+- Formulários abrem em folhas na parte de baixo da tela. No iPhone o teclado cobre a página sem encolhê-la, então [`app/js/ui/viewport.js`](app/js/ui/viewport.js) mede a área que continua à vista e a folha se encaixa nela, acima do teclado. O foco é feito dentro do toque (só assim o iPhone abre o teclado) e sem rolagem do navegador.
+- Campos de texto livre não usam `autocomplete="off"` nem `<datalist>`: no iPhone o primeiro desliga as previsões do teclado e o segundo toma o lugar das sugestões de palavras.
 - O servidor é mínimo e não conhece o conteúdo dos dados.
 
 ## Começando
@@ -206,19 +208,19 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 132 testes com o executor nativo do Node, sem dependências externas.
+São 135 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|
 | `tests/budget.test.js` | Limite diário (critérios de aceitação), gastos do dia, recálculo, salário, datas mudadas e confirmações antecipadas |
 | `tests/limit.test.js` | Janela de 12 meses, receita a confirmar, margem de segurança e projeção igual à simulação dia a dia |
-| `tests/invoice.test.js` | Fatura de cartão: previsto, aberta e fechada, pagamento, datas mudadas, backup antigo e importação suja |
+| `tests/invoice.test.js` | Fatura de cartão: previsto, aberta e fechada, pagamento, datas mudadas, dia da compra de cada gasto, backup antigo e importação suja |
 | `tests/savings.test.js` | Sugestão de poupança: teto, piso, mês apertado, saldo da conta, várias receitas e janela de 7 dias |
 | `tests/refill.test.js` | Cobertura, sugestão de resgate, corte por receita, limite da reserva e excedente |
 | `tests/businessDays.test.js` | Páscoa, feriados nacionais, Nº dia útil, regra do sábado e datas sem erro de fuso |
 | `tests/schedule.test.js` | Recorrências, receitas únicas, pendências e ocorrências com data mudada |
 | `tests/money.test.js` | Leitura e formatação de valores em pt-BR |
-| `tests/store.test.js` | Receitas lançadas na hora, nome e renomeação de lançamentos, sugestões de nomes, uso das contas |
+| `tests/store.test.js` | Receitas lançadas na hora, nome e renomeação de lançamentos, uso das contas |
 | `tests/vault.test.js` | Código de recuperação, derivação de chaves, cifra e adulteração |
 | `tests/sync-core.test.js` | API do backup: revisões, conflitos, corrida entre aparelhos e validação |
 

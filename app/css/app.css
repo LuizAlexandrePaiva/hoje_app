@@ -250,6 +250,19 @@ input[type="date"], input[type="month"] {
   -webkit-appearance: none; appearance: none; display: block; text-align: left; line-height: 1.2;
 }
 input::-webkit-date-and-time-value { text-align: left; margin: 0; }
+/* Data no telefone: vale o texto do app ("8 de nov"), por cima do campo nativo.
+   O do iPhone é longo demais para meia coluna e some quando o campo está vazio. */
+.date { position: relative; display: flex; min-width: 0; }
+.date-text { display: none; }
+@media (pointer: coarse) {
+  .date input { color: transparent; -webkit-text-fill-color: transparent; }
+  .date input::-webkit-calendar-picker-indicator { opacity: 0; }
+  .date-text {
+    display: block; position: absolute; left: 15px; right: 15px; top: 50%; transform: translateY(-50%);
+    pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .date-text.empty { color: var(--placeholder); }
+}
 input::placeholder { color: var(--placeholder); }
 input:focus, select:focus { outline: none; border-color: var(--text); box-shadow: 0 0 0 3px #ffffff1f; }
 .money { position: relative; display: flex; min-width: 0; }
@@ -357,19 +370,36 @@ details.more > div { display: flex; flex-direction: column; gap: 16px; padding-b
 
 /* ---------- folha modal ---------- */
 .sheet-backdrop {
-  position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .64);
+  position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: flex-end; justify-content: center;
   opacity: 0; transition: opacity .15s;
+  /* o iPhone empurra a página para mostrar um campo; a folha acompanha a área visível */
+  transform: translateY(var(--view-top, 0px));
 }
+/* Teclado aberto: no iPhone ele cobre a página sem encolhê-la, então a caixa da
+   folha passa a ser só a área visível acima dele (medida em js/ui/viewport.js). */
+.kb .sheet-backdrop { bottom: auto; height: var(--view-h); }
+/* o escurecido cobre a tela toda, inclusive onde o teclado ainda vai chegar */
+.sheet-backdrop::before { content: ""; position: absolute; left: 0; right: 0; top: -100vh; bottom: -100vh; background: rgba(0, 0, 0, .64); }
 .sheet-backdrop.open { opacity: 1; }
 .sheet {
-  width: 100%; max-width: 540px; max-height: 92dvh; overflow-y: auto; overflow-x: hidden;
+  position: relative; width: 100%; max-width: 540px;
+  max-height: min(92%, calc(100% - var(--safe-t) - 8px)); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
   background: var(--surface); border-radius: 28px 28px 0 0;
   box-shadow: inset 0 1px 0 var(--line);
   padding: 0 var(--gutter) calc(20px + var(--safe-b));
   transform: translateY(16px); transition: transform .18s;
 }
 .sheet-backdrop.open .sheet { transform: none; }
+/* teclado aberto: ele já cobre a faixa do indicador de início, e a altura que sobra é toda da folha */
+.kb .sheet { max-height: calc(100% - var(--safe-t) - 8px); padding-bottom: 16px; }
+.kb .sheet-body, .kb .sheet .form { gap: 14px; }
+/* telas baixas (iPhone SE e afins) com teclado: espaços menores para o formulário caber inteiro */
+.kb-short .sheet { max-height: calc(100% - var(--safe-t) - 4px); padding-bottom: 12px; }
+.kb-short .sheet-head { padding: 10px 0 4px; }
+.kb-short .sheet-body { padding-bottom: 0; }
+.kb-short .sheet-body, .kb-short .sheet .form { gap: 12px; }
+.kb-short .sheet .form-actions { margin-top: 0; }
 .sheet-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   position: sticky; top: 0; background: var(--surface); padding: 18px 0 10px; z-index: 1;
@@ -400,7 +430,7 @@ details.more > div { display: flex; flex-direction: column; gap: 16px; padding-b
 }
 body.no-tabbar .toast { bottom: calc(var(--safe-b) + 16px); }
 /* com folha aberta o aviso sobe (embaixo ele cobriria os controles da folha) e deixa livre o botão de fechar */
-body.no-scroll .toast { bottom: auto; top: calc(var(--safe-t) + 12px); left: calc(50% - 26px); width: calc(100% - 2 * var(--gutter) - 52px); max-width: 448px; }
+body.no-scroll .toast { bottom: auto; top: calc(var(--view-top, 0px) + var(--safe-t) + 12px); left: calc(50% - 26px); width: calc(100% - 2 * var(--gutter) - 52px); max-width: 448px; }
 .toast-action {
   background: #0b0c0f14; border: 0; border-radius: 11px; color: var(--primary-ink); font-weight: 700;
   min-height: 44px; padding: 0 14px; cursor: pointer; flex: none;
@@ -551,9 +581,6 @@ html, body, .main { overflow-x: clip; }
   :root { --gutter: 16px; }
   .tabbar a.tab-add { margin-left: 4px; margin-right: 4px; }
 }
-
-/* campo de nome com sugestões: sem a seta de lista (parece um seletor no Android) */
-input[list]::-webkit-calendar-picker-indicator { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

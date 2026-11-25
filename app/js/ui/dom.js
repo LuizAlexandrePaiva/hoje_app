@@ -1,6 +1,7 @@
 // Utilitários mínimos de interface (sem framework).
 
 import { icon } from './icons.js';
+import { opensKeyboard, expectKeyboard, expectNoKeyboard, keyboardOpen, onViewportChange } from './viewport.js';
 
 /** h('div', { class: 'x', onclick }, filho1, filho2…) */
 export function h(tag, attrs = {}, ...children) {
@@ -82,6 +83,40 @@ function focusables(panel) {
   return [...panel.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement);
 }
 
+/**
+ * Distância mínima entre o campo em foco e o teclado. Abaixo de 50 px o Safari
+ * do iPhone empurra a página inteira para "mostrar melhor" o campo.
+ */
+const KEYBOARD_GAP = 58;
+
+/** Mantém o campo em foco à vista dentro da folha (o foco é feito sem rolagem do navegador). */
+function reveal(el = document.activeElement) {
+  const panel = openSheet?.panel;
+  if (!panel || !el || el === panel || !panel.contains(el)) return;
+  const box = (el.closest('.field, .inline-field, .switch-row') || el).getBoundingClientRect();
+  const view = panel.getBoundingClientRect();
+  const top = view.top + (panel.querySelector('.sheet-head')?.offsetHeight || 0) + 4;
+  const bottom = view.bottom - (keyboardOpen() ? KEYBOARD_GAP : 12);
+  if (box.bottom > bottom) panel.scrollTop += Math.min(box.bottom - bottom, box.top - top);
+  else if (box.top < top) panel.scrollTop -= top - box.top;
+}
+
+/** Foco em um campo da folha, sem deixar o navegador rolar a página para alcançá-lo. */
+export function focusField(el) {
+  if (!el) return;
+  expectKeyboard(el);
+  el.focus({ preventScroll: true });
+  reveal(el);
+}
+
+// O teclado abriu, fechou ou trocou de tamanho: o campo em foco continua à vista
+// e, com o teclado fechado, a página atrás volta ao lugar se tiver sido empurrada.
+onViewportChange(() => {
+  if (!openSheet) return;
+  reveal();
+  if (!keyboardOpen() && Math.abs(window.scrollY - openSheet.scrollY) > 1) window.scrollTo(window.scrollX, openSheet.scrollY);
+});
+
 // Esc fecha e Tab circula dentro da folha aberta.
 document.addEventListener('keydown', (e) => {
   if (!openSheet) return;
@@ -110,6 +145,7 @@ export function sheet(title, build, { onClose } = {}) {
   // Trocar de folha reaproveita a entrada de histórico já criada
   const previous = openSheet;
   const returnFocus = previous ? previous.returnFocus : document.activeElement;
+  const scrollY = previous ? previous.scrollY : window.scrollY;
   if (previous) {
     openSheet = null;
     previous.onClose?.();
@@ -123,7 +159,35 @@ export function sheet(title, build, { onClose } = {}) {
       h('h2', { id: titleId }, title),
       h('button', { class: 'icon-btn', 'aria-label': 'Fechar', onclick: close }, icon('close'))),
     h('div', { class: 'sheet-body' }, build(close)));
-  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  // Tocar fora fecha, mas só quando o toque começou e terminou no fundo: ao focar
+  // um campo a folha sobe, e o fim desse mesmo toque cairia no fundo.
+  let pressedOutside = false;
+  backdrop.addEventListener('pointerdown', (e) => { pressedOutside = e.target === backdrop; });
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop && pressedOutside) close();
+    pressedOutside = false;
+  });
+  // Teclado: a folha sobe no instante do foco e desce quando o foco sai dos campos de digitar.
+  let leaving = 0;
+  backdrop.addEventListener('focusin', (e) => {
+    clearTimeout(leaving);
+    expectKeyboard(e.target);
+    reveal(e.target);
+  });
+  backdrop.addEventListener('focusout', (e) => {
+    if (!opensKeyboard(e.target) || opensKeyboard(e.relatedTarget)) return;
+    // foi para a data ou para um seletor: a folha desce já, antes de o calendário ou a lista abrir ao lado do campo
+    if (e.relatedTarget?.matches?.('input, select')) return expectNoKeyboard();
+    // senão, um instante de espera: o toque em um botão pode devolver o foco a um campo
+    leaving = setTimeout(() => { if (!opensKeyboard(document.activeElement)) expectNoKeyboard(); }, 100);
+  });
+  // Com o teclado aberto o iPhone deixa arrastar a página inteira. A folha fica
+  // parada: só o conteúdo dela rola, quando não cabe.
+  backdrop.addEventListener('touchmove', (e) => {
+    if (!e.cancelable || e.touches.length > 1) return;
+    const scrolls = panel.scrollHeight > panel.clientHeight + 1;
+    if (!scrolls || !panel.contains(e.target)) e.preventDefault();
+  }, { passive: false });
   backdrop.append(panel);
   document.body.append(backdrop);
   document.body.classList.add('no-scroll');
@@ -134,26 +198,34 @@ export function sheet(title, build, { onClose } = {}) {
     onPop = () => closeSheet(true);
     window.addEventListener('popstate', onPop, { once: true });
   }
-  openSheet = { backdrop, panel, onPop, onClose, returnFocus };
+  openSheet = { backdrop, panel, onPop, onClose, returnFocus, scrollY };
   fitText(panel);
+  // Campo de digitar recebe o foco já, dentro do toque que abriu a folha: no iPhone
+  // o teclado só sobe assim. Seletor e data esperam, para não abrir sozinhos.
+  const first = panel.querySelector('input:not([type=checkbox]):not([type=radio]), select');
+  const autofocus = first && !first.dataset.noautofocus ? first : null;
+  if (opensKeyboard(autofocus)) focusField(autofocus);
+  else expectNoKeyboard(); // a folha anterior tinha o teclado aberto e esta não vai usar
   requestAnimationFrame(() => {
     backdrop.classList.add('open');
-    if (panel.contains(document.activeElement)) return; // quem abriu já escolheu o foco
-    const first = panel.querySelector('input:not([type=checkbox]):not([type=radio]), select');
-    if (first && !first.dataset.noautofocus) first.focus({ preventScroll: true });
+    if (panel.contains(document.activeElement)) return; // o foco já foi escolhido
+    if (autofocus) autofocus.focus({ preventScroll: true });
     else panel.focus({ preventScroll: true });
   });
 }
 
 export function closeSheet(fromPop = false) {
   if (!openSheet) return;
-  const { backdrop, onPop, onClose, returnFocus } = openSheet;
+  const { backdrop, onPop, onClose, returnFocus, scrollY } = openSheet;
   openSheet = null;
   onClose?.();
   window.removeEventListener('popstate', onPop);
   backdrop.remove();
   document.body.classList.remove('no-scroll');
   setBackgroundInert(false);
+  expectNoKeyboard();
+  // o iPhone pode ter empurrado a página para mostrar um campo: ela volta para onde estava
+  if (Math.abs(window.scrollY - scrollY) > 1) window.scrollTo(window.scrollX, scrollY);
   if (returnFocus?.isConnected && typeof returnFocus.focus === 'function') returnFocus.focus({ preventScroll: true });
   if (!fromPop && history.state?.sheet) history.back();
 }

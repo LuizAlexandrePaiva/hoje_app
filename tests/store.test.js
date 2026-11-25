@@ -44,16 +44,7 @@ test('renomear não mexe em valores nem saldos', () => {
   assert.equal(store.getState().transactions[0].amount, 2500);
 });
 
-test('sugestões: nomes de gastos recentes, sem repetir e sem outros lançamentos', () => {
-  store.addSpend(100, 'Café');
-  store.addSpend(200, 'Mercado');
-  store.addSpend(300, 'café');
-  store.addSpend(400, '');
-  store.transfer('cdb', 'cc', 5000, 'Resgate');
-  assert.deepEqual(store.recentNames('spend'), ['café', 'Mercado']);
-});
-
-test('receita avulsa entra no saldo na hora, não conta como gasto e tem sugestões próprias', async () => {
+test('receita avulsa entra no saldo na hora e não conta como gasto', async () => {
   const before = computeDailyBudget(store.getState(), '2026-10-26');
   store.addIncome(42000, 'Freela', 'cc');
   const s = store.getState();
@@ -62,9 +53,6 @@ test('receita avulsa entra no saldo na hora, não conta como gasto e tem sugest�
   assert.equal(after.spentToday, 0);
   assert.equal(after.dailyBudget, Math.round((734900 + 42000) / 42)); // 18498: repartida até 6/12
   assert.ok(after.dailyBudget > before.dailyBudget);
-  store.addSpend(1000, 'Café');
-  assert.deepEqual(store.recentNames('income'), ['Freela']);
-  assert.deepEqual(store.recentNames('spend'), ['Café']);
 });
 
 test('papéis das contas: trocar gastos do dia e reserva, sem reserva, nunca sem conta de gastos', () => {

@@ -75,7 +75,7 @@ function feature(ico, title, sub) {
 
 export function restoreSheet({ replacing = false, fileButton } = {}) {
   const input = h('input', {
-    type: 'text', class: 'code-input', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false',
+    type: 'text', class: 'code-input', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false',
     placeholder: 'XXXX XXXX XXXX XXXX XXXX XXXX',
   });
   const err = h('p', { class: 'form-error', role: 'alert' });

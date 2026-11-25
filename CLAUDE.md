@@ -34,7 +34,10 @@ acessibilidade e textos foi mantido.
 - **Formatos:** negativos sempre com U+2212 (`formatBRL` já faz isso); valores com sinal via `formatSigned(cents, ±1)` (gasto "−", receita "+" em verde, transferência neutra com ícone de troca). Datas por extenso em frases ("8 de nov", `formatDayMonth`); `dd/mm` só no eixo do gráfico.
 - **Evitar (vícios de template):** brilho radial atrás do número do dia; rótulos em caixa alta espaçada; emoji ou caracteres Unicode (▲ ▼ →) no lugar de ícones ou palavras; monoespaçada fora do código de recuperação; Inter.
 - **Componentes:**
-  - **Folhas modais:** `sheet()` em `app/js/ui/dom.js` move o foco, prende o Tab, fecha com Esc, deixa o fundo `inert` e devolve o foco. Se quem abriu já pôs o foco dentro da folha, ela não mexe.
+  - **Folhas modais:** `sheet()` em `app/js/ui/dom.js` move o foco, prende o Tab, fecha com Esc, deixa o fundo `inert` e devolve o foco. Se quem abriu já pôs o foco dentro da folha, ela não mexe. Tocar fora só fecha quando o toque começou e terminou no fundo.
+  - **Folha e teclado do iPhone:** o teclado cobre a página sem encolhê-la. `app/js/ui/viewport.js` publica a área visível (`--view-h`, `--view-top`, classes `kb` e `kb-short` em `<html>`) e a folha se encaixa nela, acima do teclado. No instante do foco o módulo adianta a posição com a última altura de teclado medida (guardada em `localStorage`, chave `hoje:teclado`); a medida real sempre prevalece. Foco em campo da folha é sempre por `focusField()` (dentro do toque e com `preventScroll`): fora do toque o iPhone não abre o teclado, e sem `preventScroll` ele empurra a página. Cadastro novo foca o primeiro campo; edição não abre o teclado sozinha (`waitForTap`).
+  - **Campos de texto:** sem `autocomplete="off"` e sem `<datalist>`. No iPhone o primeiro desliga as previsões do teclado (iOS 18+) e o segundo toma a barra de sugestões e abre uma lista por cima do formulário. Valor em dinheiro continua `inputmode="decimal"`.
+  - **Campo de data:** `field()` embrulha `input[type=date]` e, no telefone, mostra o texto no formato do app ("8 de nov") por cima do nativo; vazio mostra "Escolher" ou o texto de `data-empty` ("Sem data"). O calendário é o do sistema; no iPhone, "Redefinir" limpa a data.
   - **Erros de formulário:** `fail(err, msg, input)` em `editors.js` põe a mensagem embaixo do campo, com `aria-invalid` e foco.
   - **Toasts:** confirmações curtas, com "Desfazer" quando a ação muda o cálculo; explicações longas vão dentro da folha. Com folha aberta, o toast vai para o topo.
   - **Listas:** o detalhe (`.li-sub`) de linhas com botão e de movimentações quebra linha, nunca corta.
@@ -43,7 +46,7 @@ acessibilidade e textos foi mantido.
 ## Regras de cálculo (versão 2.0.0)
 
 - **Limite:** maior valor diário que não deixa faltar dinheiro em nenhum dia dos próximos 12 meses (sem receita recorrente, 30 dias depois da última receita). Receita de hoje ou atrasada, ainda não confirmada, entra no limite mas não libera gasto. Margem de segurança opcional (`settings.cushion`). Critérios de aceitação: R$ 169,93 e resgate de R$ 1.150 em `tests/fixtures.js`.
-- **Fatura de cartão:** despesa fixa com `isCard`; `state.invoices` pela chave da ocorrência. Previsto sem gastos; maior entre previsto e soma com a fatura aberta; soma com a fatura fechada.
+- **Fatura de cartão:** despesa fixa com `isCard`; `state.invoices` pela chave da ocorrência. Previsto sem gastos; maior entre previsto e soma com a fatura aberta; soma com a fatura fechada. Cada gasto tem nome, valor e, opcional, o dia da compra (`date`): só registro, ordena a lista (sem data primeiro, depois do mais antigo ao mais recente) e não entra em conta nenhuma.
 - **Poupança sugerida** (`app/js/core/savings.js`): cada receita que entra numa conta de gasto tem o próprio teto, 10% do valor que de fato entrou (R$ 1.000 → até R$ 100; duas receitas, dois tetos). A sugestão é o maior valor em reais inteiros, até o teto e até o saldo da conta da receita, que deixa o limite do dia em pelo menos 90% do gasto típico (gastos dos últimos 30 dias; sem 7 dias de histórico, 90% do limite de hoje). Zero quando o limite já está abaixo disso ("Mês apertado"), quando daria menos de R$ 10 ou de 1% da receita, ou enquanto há receita esperando confirmação. Fica 7 dias em Hoje; uma poupança por receita; na folha dá para digitar até os 10%. Guardar é uma transferência para conta de meta (`savingOf`). Só `type: 'income'` conta: resgate e ajuste de saldo não geram sugestão.
 - **Efeito da janela de 12 meses na poupança:** guardar R$ 100 baixa o limite só cerca de R$ 1 por dia, então na prática a sugestão é quase sempre 10% ou nada; o valor parcial aparece numa faixa estreita de aperto (ex.: R$ 74 de R$ 100).
 
@@ -52,12 +55,14 @@ acessibilidade e textos foi mantido.
 - **Poupança:** manter o piso em 90% do gasto típico ou subir para 100% (sugestões menores e irregulares)? Fazer a sugestão encolher aos poucos conforme o mês aperta, em vez de quase sempre 10% ou nada? Ele confirmou que a ideia é "até 10% de cada receita, caso possa" (10/11) e ainda não decidiu esses dois pontos.
 - **Dia de receita:** antes de confirmar, Hoje libera só o que caberia sem a receita ("Libera R$ X ao confirmar Salário"). Alternativa oferecida: liberar o limite inteiro quando houver dinheiro em conta e segurar só quando a receita atrasar.
 - **Cartão:** sem parcelamento e sem lançar compra no cartão pelo +. Oferecido, não pedido.
+- **Sugestões de nomes:** as listas de nomes já usados (no +, ao renomear e na fatura) saíram na 2.1.0, porque no iPhone eram o que tomava o lugar das sugestões do teclado. Se o dono sentir falta, a saída é uma fileira de botões dentro da própria tela, nunca `<datalist>`.
 
 ## Verificação
 
-- `npm test`: 132 testes (`tests/`), incluindo `limit.test.js`, `invoice.test.js` e `savings.test.js`.
+- `npm test`: 135 testes (`tests/`), incluindo `limit.test.js`, `invoice.test.js` e `savings.test.js`.
 - Além dos testes, cada versão foi conferida no navegador com scripts Playwright (fluxos completos com relógio fixo, auditoria de transbordo a 320, 360, 390 e 430 px, telas em iPhone SE a Pro Max). Esses scripts ficaram no rascunho da sessão e não estão no repositório; recriar quando precisar, com os dados de `tests/fixtures.js`.
-- Ainda sem verificação em aparelho real: a 2.0 inteira, o ajuste de fonte nativo do iOS/Android e os estados "Salvo" e "Conflito" do backup.
+- O teclado do iPhone não existe no ambiente de nuvem. A folha é testada no Chromium com um teclado simulado (um script que encolhe `visualViewport.height` e mantém `innerHeight`, como o iOS faz); o comportamento do Safari foi tirado do código-fonte do WebKit (`raw.githubusercontent.com/WebKit/WebKit` é alcançável), não de aparelho.
+- Ainda sem verificação em aparelho real: a folha com teclado da 2.1.0, o ajuste de fonte nativo do iOS/Android e os estados "Salvo" e "Conflito" do backup.
 
 ## Ferramentas instaladas
 
@@ -68,6 +73,7 @@ acessibilidade e textos foi mantido.
 
 ## Histórico
 
+- **2026-11-25, versão 2.1.0:** o dono mandou uma captura do iPhone com a folha "Novo gasto" da fatura coberta por uma lista de sugestões e pediu quatro coisas: data nos gastos da fatura; sem a lista de sugestões; a folha e o formulário consertados (não ficava fixa e o teclado cobria os campos); e o preenchimento automático do iPhone funcionando nos campos. Causas achadas no código-fonte do WebKit: o foco era feito um instante depois do toque (o iPhone não abre o teclado assim), a folha ficava presa à tela inteira e não à área visível, `autocomplete="off"` desligava as previsões do teclado e o `<datalist>` ocupava a barra de sugestões. Feito: `viewport.js`, foco dentro do toque, campo de data com texto do app, fim das listas de nomes e do `autocomplete="off"` em texto livre. Testes: 135 passando.
 - **2026-11-10, análise da poupança:** o dono pediu para conferir se a regra é "no máximo 10% de cada receita". Confirmado em código e em simulação, sem mudar nada; ficaram os pontos de "Em aberto".
 - **2026-11-10, publicação da 2.0.0 (PR #3):** a `main` tinha a 1.9.3, feita em outra sessão. O dono comparou os dois visuais lado a lado e escolheu o 2.0; da 1.9.3 entraram acessibilidade, textos e o desfazer "Não veio". A fonte Red Hat Text saiu.
 - **2026-11-10, versão 2.0.0:** redesenho inteiro (visual acima), valor de amanhã em Hoje, gráfico de uma linha refeito, nova lógica do limite (janela de 12 meses, receita a confirmar, margem de segurança), fatura de cartão e poupança sugerida. Projetado e revisado com painéis de agentes (propostas independentes, ataque às propostas, revisão adversarial com céticos); 31 achados corrigidos. Juntado com a 1.9.3 mantendo dela a acessibilidade das folhas, os erros embaixo do campo, o sinal de menos, as mensagens e o desfazer "Não veio". Testes: 132 passando.

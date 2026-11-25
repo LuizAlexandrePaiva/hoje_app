@@ -1,7 +1,7 @@
 // Service worker: cache-first para os arquivos do app (funciona 100% offline
 // depois da primeira visita). Ao publicar mudanças, aumente CACHE_VERSION.
 
-const CACHE_VERSION = '2.0.0';
+const CACHE_VERSION = '2.1.0';
 const CACHE = `hoje-${CACHE_VERSION}`;
 
 const APP_FILES = [
@@ -32,6 +32,7 @@ const APP_FILES = [
   './js/core/vault.js',
   './js/ui/backup.js',
   './js/ui/dom.js',
+  './js/ui/viewport.js',
   './js/ui/icons.js',
   './js/ui/editors.js',
   './js/ui/screens/today.js',
