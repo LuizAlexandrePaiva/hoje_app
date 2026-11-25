@@ -4,7 +4,7 @@
 import { applyTransaction, revertTransaction } from './ledger.js';
 import { todayISO, isValidISO } from '../core/dates.js';
 import { DEFAULT_REFILL } from '../core/refill.js';
-import { parseInvoiceKey, sanitizeInvoices, validItemDate } from '../core/invoice.js';
+import { parseInvoiceKey, sanitizeInvoices, invoiceDatesOf, validItemDate } from '../core/invoice.js';
 
 const KEY = 'hoje:v1';
 export const SCHEMA_VERSION = 1;
@@ -34,6 +34,7 @@ export function emptyState(today = todayISO()) {
     settled: {},
     moved: {}, // datas mudadas de ocorrências: { chave: 'AAAA-MM-DD' }
     invoices: {}, // faturas de cartão: { chave da ocorrência: { items: [{ id, name, amount, date? }], closed? } }
+    invoiceDates: {}, // cópia dos dias de compra, à prova de aparelho ainda na 2.0.0 (ver core/invoice.js)
     transactions: [],
   };
 }
@@ -74,6 +75,7 @@ export function subscribe(fn) {
 /** Executa uma mutação, salva e avisa a interface. */
 export function commit(mutator) {
   const result = mutator(state);
+  state.invoiceDates = invoiceDatesOf(state.invoices); // a cópia das datas acompanha cada gravação
   save();
   listeners.forEach((fn) => fn(state));
   return result;
@@ -96,7 +98,8 @@ function normalize(data) {
   for (const a of s.accounts) {
     if (typeof a.id !== 'string' || !Number.isInteger(a.balance)) throw new Error('O backup tem uma conta com dados incompletos.');
   }
-  s.invoices = sanitizeInvoices(s.invoices, s.expenses, NAME_MAX);
+  s.invoices = sanitizeInvoices(s.invoices, s.expenses, NAME_MAX, s.invoiceDates);
+  s.invoiceDates = invoiceDatesOf(s.invoices);
   return s;
 }
 

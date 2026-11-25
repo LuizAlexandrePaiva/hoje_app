@@ -62,13 +62,33 @@ export function invoiceSummary(estimate, invoice) {
 }
 
 /**
+ * Cópia dos dias de compra, fora dos gastos: { chave da fatura: { id do gasto: 'AAAA-MM-DD' } }.
+ * Existe por causa da versão 2.0.0: ela regrava cada gasto só com id, nome e
+ * valor, então um aparelho ainda nela que sincroniza apagaria as datas de todos
+ * os outros. Chaves de topo do estado ela preserva; a cópia volta junto e
+ * `sanitizeInvoices` devolve as datas aos gastos.
+ */
+export function invoiceDatesOf(invoices) {
+  const out = {};
+  for (const [key, inv] of Object.entries(invoices || {})) {
+    for (const it of inv?.items || []) {
+      if (validItemDate(it?.date)) (out[key] ||= {})[it.id] = it.date;
+    }
+  }
+  return out;
+}
+
+/**
  * Lê state.invoices de qualquer backup e devolve um mapa íntegro: só chaves de
  * despesas que existem, itens com id único e valor inteiro positivo, nenhuma
  * fatura vazia. `nameMax` corta nomes longos; data inválida some (o gasto fica).
+ * `dates` é a cópia dos dias de compra (`invoiceDatesOf`): gasto que chega sem
+ * data recebe a dela.
  */
-export function sanitizeInvoices(raw, expenses = [], nameMax = 60) {
+export function sanitizeInvoices(raw, expenses = [], nameMax = 60, dates = null) {
   const out = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const kept = dates && typeof dates === 'object' ? dates : {};
   const known = new Set((expenses || []).map((e) => e.id));
   for (const [key, inv] of Object.entries(raw)) {
     const p = parseInvoiceKey(key);
@@ -81,7 +101,8 @@ export function sanitizeInvoices(raw, expenses = [], nameMax = 60) {
       for (let n = items.length; !id || seen.has(id); n++) id = `it_${n}`;
       seen.add(id);
       const item = { id, name: String(it.name ?? '').replace(/\s+/g, ' ').trim().slice(0, nameMax), amount: it.amount };
-      if (validItemDate(it.date)) item.date = it.date;
+      const date = validItemDate(it.date) ? it.date : kept[key]?.[id];
+      if (validItemDate(date)) item.date = date;
       items.push(item);
     }
     if (!items.length) continue;

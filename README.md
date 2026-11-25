@@ -110,7 +110,7 @@ O cálculo é uma função pura, `computeDailyBudget(state, hoje)`, em [`app/js/
 - Fatura fechada: a soma dos gastos.
 - Paga ou pulada: nada, como qualquer ocorrência confirmada.
 
-Os gastos da fatura não mexem em saldo nem contam como gasto do dia. O dia da compra é só registro: ordena a lista (primeiro os gastos sem data, depois do mais antigo ao mais recente) e não entra em nenhuma conta.
+Os gastos da fatura não mexem em saldo nem contam como gasto do dia. O dia da compra é só registro: ordena a lista (primeiro os gastos sem data, depois do mais antigo ao mais recente) e não entra em nenhuma conta. As datas têm uma cópia em `state.invoiceDates`, para um aparelho ainda na versão 2.0.0 não apagá-las ao sincronizar.
 
 **Sugestão de resgate** ([`app/js/core/refill.js`](app/js/core/refill.js)): `limite × dias desejados + compromissos da conta no período − saldo atual`, arredondado para cima em múltiplos de R$ 50 e limitado ao saldo da reserva. Se uma receita cair na conta antes do fim do período, o resgate cobre só até ela.
 
@@ -185,7 +185,7 @@ hoje_app/
 
 - A lógica de negócio em `app/js/core/` é pura e determinística: recebe o estado e a data, devolve números. Nada nela acessa DOM, armazenamento ou relógio.
 - A interface é renderizada a partir do estado a cada mudança, sem framework.
-- Formulários abrem em folhas na parte de baixo da tela. No iPhone o teclado cobre a página sem encolhê-la, então [`app/js/ui/viewport.js`](app/js/ui/viewport.js) mede a área que continua à vista e a folha se encaixa nela, acima do teclado. O foco é feito dentro do toque (só assim o iPhone abre o teclado) e sem rolagem do navegador.
+- Formulários abrem em folhas na parte de baixo da tela. No iPhone o teclado cobre a página sem encolhê-la, então [`app/js/ui/viewport.js`](app/js/ui/viewport.js) mede a área que continua à vista e a folha se encaixa nela, acima do teclado. O foco é feito dentro do toque (só assim o iPhone abre o teclado) e com `preventScroll` (sem isso o Safari empurra a página para centralizar o campo).
 - Campos de texto livre não usam `autocomplete="off"` nem `<datalist>`: no iPhone o primeiro desliga as previsões do teclado e o segundo toma o lugar das sugestões de palavras.
 - O servidor é mínimo e não conhece o conteúdo dos dados.
 
@@ -208,7 +208,7 @@ O service worker funciona em `localhost` sem HTTPS. O comando `npm start` serve 
 npm test
 ```
 
-São 135 testes com o executor nativo do Node, sem dependências externas.
+São 137 testes com o executor nativo do Node, sem dependências externas.
 
 | Arquivo | Cobertura |
 |---|---|

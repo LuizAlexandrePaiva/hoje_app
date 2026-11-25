@@ -1,13 +1,13 @@
 // Formulários (em folha modal) e listas editáveis de contas, receitas,
 // despesas fixas, metas e aportes. Usados no assistente inicial e em Ajustes.
 
-import { h, sheet, closeSheet, toast, confirmDialog, afterSheetClosed, joinList, focusField, amount as moneyText } from './dom.js';
+import { h, sheet, closeSheet, toast, confirmDialog, afterSheetClosed, joinList, focusField, centerInSheet, fitText, amount as moneyText } from './dom.js';
 import { icon } from './icons.js';
 import * as store from '../data/store.js';
 import { formatBRL, formatBRLShort, formatSigned, formatPercent, parseBRL, toInput } from '../core/money.js';
 import { todayISO, formatDayMonth, formatMonth, shiftMonth, monthKey, relative, isValidISO, addDays, TIME_ZONE } from '../core/dates.js';
 import { MAX_MOVE_DAYS, occurrenceByKey, currentInvoices } from '../core/schedule.js';
-import { invoiceKey, parseInvoiceKey, sortInvoiceItems, validItemDate } from '../core/invoice.js';
+import { invoiceKey, parseInvoiceKey, sortInvoiceItems, validItemDate, ITEM_DATE_MIN, ITEM_DATE_MAX } from '../core/invoice.js';
 import { computeDailyBudget, withDelta } from '../core/budget.js';
 import { suggestRefill } from '../core/refill.js';
 import { SAVINGS, openSavings, suggestSaving } from '../core/savings.js';
@@ -30,16 +30,20 @@ export function field(label, input, hint) {
  * no campo troca o texto de quando não há data.
  */
 function dateBox(input) {
-  const text = h('span', { class: 'date-text', 'aria-hidden': 'true' });
+  const text = h('span', { class: 'date-text', 'aria-hidden': 'true', 'data-fit': true });
+  const box = h('span', { class: 'date' }, input, text);
   const sync = () => {
     const filled = isValidISO(input.value);
     text.textContent = filled ? formatDayMonth(input.value, yearOf(todayISO())) : input.dataset.empty || 'Escolher';
     text.classList.toggle('empty', !filled);
+    if (box.isConnected) fitText(box); // data de outro ano em meia coluna: a letra encolhe em vez de cortar
   };
   input.addEventListener('input', sync);
   input.addEventListener('change', sync);
+  // quem digita a data (tablet com teclado) precisa ver os dígitos: volta o campo nativo
+  input.addEventListener('keydown', (e) => { if (e.key.length === 1) box.classList.add('typed'); });
   sync();
-  return h('span', { class: 'date' }, input, text);
+  return box;
 }
 
 export function moneyInput(cents, attrs = {}) {
@@ -59,11 +63,12 @@ function textInput(value, attrs = {}) {
 }
 
 /**
- * Atributos do primeiro campo de um formulário de edição: o teclado não abre
- * sozinho, porque quem abre uma ficha pronta costuma querer só conferir ou
- * trocar um detalhe. Em cadastro novo o campo recebe o foco e o teclado já vem.
+ * Atributos do primeiro campo de um formulário de edição, em aparelho de toque:
+ * o teclado não abre sozinho, porque quem abre uma ficha pronta costuma querer só
+ * conferir ou trocar um detalhe. Em cadastro novo (e no computador, onde não há
+ * teclado na tela) o campo recebe o foco.
  */
-const waitForTap = (isNew) => (isNew ? {} : { 'data-noautofocus': '1' });
+const waitForTap = (isNew) => (isNew || !window.matchMedia?.('(pointer: coarse)').matches ? {} : { 'data-noautofocus': '1' });
 
 function numberInput(value, attrs = {}) {
   return h('input', { type: 'text', inputmode: 'numeric', pattern: '[0-9]*', value: value ?? '', ...attrs });
@@ -901,7 +906,7 @@ export function invoiceSheet(key, { scroll, focus } = {}) {
     paid && !paid.skipped && h('p', { class: 'field-hint' }, 'Para desfazer o pagamento, exclua a movimentação em Contas.'),
   ]);
   const panel = document.querySelector('.sheet');
-  if (scroll === 'add') panel.querySelector('[data-add]')?.scrollIntoView({ block: 'center' });
+  if (scroll === 'add') centerInSheet(panel.querySelector('[data-add]'));
   else if (scroll != null) panel.scrollTop = scroll;
   // a folha é refeita a cada troca: devolve o foco ao controle usado (ou ao mês, se ele sumiu)
   if (focus) (panel.querySelector(focus) || panel.querySelector('.month-nav .li-title'))?.focus({ preventScroll: true });
@@ -918,7 +923,7 @@ function invoiceItemSheet(key, item) {
   const isNew = !item;
   let added = 0;
   const value = moneyInput(item?.amount ?? null);
-  const date = dateInput(isNew ? todayISO() : item.date || '', { 'data-empty': 'Sem data' });
+  const date = dateInput(isNew ? todayISO() : item.date || '', { min: ITEM_DATE_MIN, max: ITEM_DATE_MAX, 'data-empty': 'Sem data' });
   const name = textInput(item?.name, {
     placeholder: 'Ex.: Mercado, Assinatura', maxlength: store.NAME_MAX, enterkeyhint: 'next', ...waitForTap(isNew),
     onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); focusField(value); } },

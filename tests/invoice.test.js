@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { scenario, TODAY } from './fixtures.js';
-import { invoiceKey, parseInvoiceKey, invoiceSummary, sanitizeInvoices, validItemDate, sortInvoiceItems } from '../app/js/core/invoice.js';
+import { invoiceKey, parseInvoiceKey, invoiceSummary, sanitizeInvoices, invoiceDatesOf, validItemDate, sortInvoiceItems } from '../app/js/core/invoice.js';
 import { expandOccurrences, openEvents, occurrenceByKey, currentInvoices } from '../app/js/core/schedule.js';
 import { computeDailyBudget } from '../app/js/core/budget.js';
 import { suggestRefill } from '../app/js/core/refill.js';
@@ -245,6 +245,26 @@ test('sanitizeInvoices: guarda o dia da compra válido e descarta só a data rui
   assert.equal(invoiceSummary(100000, out[K]).sum, 1500); // a data não entra na conta
 });
 
+test('cópia dos dias de compra: devolve a data ao gasto que chegou sem ela', () => {
+  const exps = [{ id: 'fatura' }];
+  const full = { [K]: { items: [{ id: 'a', name: 'Mercado', amount: 100, date: '2026-10-08' }, { id: 'b', name: 'Posto', amount: 200 }] }, [K11]: { items: [{ id: 'a', name: 'Padaria', amount: 300, date: '2026-11-02' }] } };
+  const dates = invoiceDatesOf(full);
+  assert.deepEqual(dates, { [K]: { a: '2026-10-08' }, [K11]: { a: '2026-11-02' } }); // por fatura: ids podem se repetir entre elas
+  // como a 2.0.0 regrava os gastos: só id, nome e valor
+  const stripped = structuredClone(full);
+  for (const inv of Object.values(stripped)) for (const it of inv.items) delete it.date;
+  assert.deepEqual(sanitizeInvoices(stripped, exps, 60, dates), full);
+  // a data do próprio gasto vale mais que a da cópia; cópia estragada não atrapalha
+  const moved = structuredClone(full);
+  moved[K].items[0].date = '2026-10-09';
+  assert.equal(sanitizeInvoices(moved, exps, 60, dates)[K].items[0].date, '2026-10-09');
+  for (const bad of [null, 5, 'x', [], { [K]: 7 }, { [K]: { a: '08/10/2026' } }, { [K]: { a: 20261008 } }]) {
+    assert.deepEqual(sanitizeInvoices(stripped, exps, 60, bad), stripped, JSON.stringify(bad));
+  }
+  assert.deepEqual(invoiceDatesOf({}), {});
+  assert.deepEqual(invoiceDatesOf(undefined), {});
+});
+
 // ---------- store ----------
 
 function boot(invoice) {
@@ -425,6 +445,27 @@ test('store: dia da compra em cada gasto (lançar, trocar, tirar, desfazer)', ()
   assert.equal(limit(store.getState()), before);
 });
 
+test('store: aparelho ainda na 2.0.0 não apaga as datas dos outros', () => {
+  const a = store.addInvoiceItem(K, { name: 'Mercado', amount: 12050, date: '2026-10-08' });
+  const b = store.addInvoiceItem(K, { name: 'Posto', amount: 990, date: '2026-10-12' });
+  assert.deepEqual(store.getState().invoiceDates, { [K]: { [a.id]: '2026-10-08', [b.id]: '2026-10-12' } });
+  // a 2.0.0 recebe o estado, regrava os gastos sem data, muda um nome e devolve; chaves de topo ela mantém
+  const old = JSON.parse(mem.get('hoje:v1'));
+  old.invoices[K].items = old.invoices[K].items.map(({ id, name, amount }) => ({ id, name, amount }));
+  old.invoices[K].items[1].name = 'Posto da esquina';
+  store.replaceState(old);
+  assert.deepEqual(store.getState().invoices[K].items.map((i) => [i.name, i.date]), [['Mercado', '2026-10-08'], ['Posto da esquina', '2026-10-12']]);
+  // tirar a data de propósito continua valendo depois de recarregar
+  store.updateInvoiceItem(K, a.id, { name: 'Mercado', amount: 12050, date: '' });
+  assert.deepEqual(store.getState().invoiceDates, { [K]: { [b.id]: '2026-10-12' } });
+  store.load();
+  assert.equal('date' in store.getState().invoices[K].items[0], false);
+  // gasto removido sai da cópia; sem gastos com data, a cópia fica vazia
+  store.removeInvoiceItem(K, b.id);
+  assert.deepEqual(store.getState().invoiceDates, {});
+  assert.deepEqual(JSON.parse(mem.get('hoje:v1')).invoiceDates, {});
+});
+
 test('store: backup com datas nos gastos vai e volta igual', () => {
   store.addInvoiceItem(K, { name: 'Mercado', amount: 12050, date: '2026-10-08' });
   store.addInvoiceItem(K, { name: 'Posto', amount: 990 });
@@ -433,11 +474,19 @@ test('store: backup com datas nos gastos vai e volta igual', () => {
   boot();
   store.importJSON(json);
   assert.deepEqual(store.getState().invoices, want);
-  // data estragada no arquivo: o gasto entra sem data
+  // data estragada no gasto: vale a da cópia que vai no mesmo arquivo
   const dirty = JSON.parse(json);
   dirty.invoices[K].items[0].date = '2026-10-32';
   store.importJSON(JSON.stringify(dirty));
+  assert.deepEqual(store.getState().invoices[K].items.map((i) => [i.name, i.amount, i.date]), [['Mercado', 12050, '2026-10-08'], ['Posto', 990, undefined]]);
+  // estragada nos dois lugares (ou arquivo sem a cópia): o gasto entra sem data
+  dirty.invoiceDates = { [K]: { [dirty.invoices[K].items[0].id]: '2026-10-32' } };
+  store.importJSON(JSON.stringify(dirty));
   assert.deepEqual(store.getState().invoices[K].items.map((i) => [i.name, i.amount, i.date]), [['Mercado', 12050, undefined], ['Posto', 990, undefined]]);
+  delete dirty.invoiceDates;
+  store.importJSON(JSON.stringify(dirty));
+  assert.deepEqual(store.getState().invoices[K].items.map((i) => i.date), [undefined, undefined]);
+  assert.deepEqual(store.getState().invoiceDates, {});
 });
 
 test('transferência não muda o limite, com fatura aberta ou fechada', () => {
