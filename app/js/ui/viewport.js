@@ -27,6 +27,10 @@ const NO_KEYBOARD = 'sem-teclado';
 const MIN_KEYBOARD = 120;
 /** Prazo para o teclado esperado aparecer antes de voltar à medida real. */
 const WAIT_MS = 700;
+/** O primeiro teclado depois de abrir o app demora mais a aparecer. */
+const FIRST_WAIT_MS = 1500;
+/** Faltas seguidas do teclado esperado até o app parar de adiantar a folha (uma só pode ser atraso). */
+const MISSES = 2;
 /** Sem medida nova por este tempo, a animação do teclado acabou. */
 const SETTLE_MS = 160;
 /** Com o teclado aberto, abaixo desta altura visível a folha aperta os espaços para o formulário caber. */
@@ -101,13 +105,19 @@ function slot(el) {
   return `${window.innerWidth > window.innerHeight ? 'deitado' : 'em-pe'}:${kind}`;
 }
 
-/** Guarda a altura medida do teclado; abaixo do mínimo, anota que ele não veio. */
-function remember(key, inset) {
+/** Este aparelho não mostra teclado na tela (teclado físico, ou o navegador encolhe a página sozinho)? */
+const absent = (data) => data[NO_KEYBOARD] >= MISSES;
+
+/**
+ * Guarda a altura medida do teclado; abaixo do mínimo, conta que ele não veio.
+ * `sure` dispensa a segunda falta: há prova de que não adianta esperar.
+ */
+function remember(key, inset, sure = false) {
   const data = readStore();
   const value = Math.round(inset);
   if (value < MIN_KEYBOARD) {
-    if (data[NO_KEYBOARD]) return;
-    data[NO_KEYBOARD] = true;
+    if (absent(data)) return;
+    data[NO_KEYBOARD] = sure ? MISSES : (Number(data[NO_KEYBOARD]) || 0) + 1;
   } else {
     if (data[key] === value && !data[NO_KEYBOARD]) return;
     data[key] = value;
@@ -120,13 +130,13 @@ function remember(key, inset) {
 function measuredBefore(key) {
   const data = readStore();
   const saved = data[key];
-  return !data[NO_KEYBOARD] && Number.isFinite(saved) && saved >= MIN_KEYBOARD && saved < window.innerHeight ? saved : 0;
+  return !absent(data) && Number.isFinite(saved) && saved >= MIN_KEYBOARD && saved < window.innerHeight ? saved : 0;
 }
 
 /** Altura esperada do teclado: a medida guardada ou, em telefone, uma estimativa. 0 = não adiantar. */
 function expectedInset(key) {
   const saved = measuredBefore(key);
-  if (saved || readStore()[NO_KEYBOARD]) return saved;
+  if (saved || absent(readStore())) return saved;
   const phone = window.matchMedia?.('(pointer: coarse)').matches && Math.min(window.innerWidth, window.innerHeight) <= PHONE_MAX_WIDTH;
   return phone ? Math.round(window.innerHeight * PHONE_KEYBOARD_SHARE) : 0;
 }
@@ -180,15 +190,19 @@ function dropHold() {
 function endGuess() {
   const g = dropGuess();
   const m = measure();
-  // teclado que não veio também fica anotado, para a folha não subir à toa de novo
-  if (g && m) remember(g.key, m.inset);
+  // Teclado que não veio também fica anotado, para a folha não subir à toa de novo.
+  // A medida é do teclado do campo em foco agora, que pode não ser o do palpite.
+  const now = document.activeElement;
+  if (g && m) remember(opensKeyboard(now) ? slot(now) : g.key, m.inset);
   sync();
 }
 
+let waited = false;
 function startGuess(inset, key, from) {
   dropGuess();
   guess = { inset, key, from, base: window.innerHeight };
-  guess.wait = setTimeout(endGuess, WAIT_MS);
+  guess.wait = setTimeout(endGuess, waited ? WAIT_MS : FIRST_WAIT_MS);
+  waited = true;
   sync();
 }
 
@@ -200,7 +214,7 @@ function sync() {
   if (guess) {
     if (guess.base - window.innerHeight >= MIN_KEYBOARD) {
       // este navegador encolhe a própria página para o teclado: não há o que adiantar aqui
-      remember(guess.key, 0);
+      remember(guess.key, 0, true);
       dropGuess();
     } else {
       // a medida mudou: o teclado está chegando; espera assentar, porque podem vir várias no caminho
@@ -232,6 +246,9 @@ export function expectKeyboard(el) {
     // teclado já aberto: só adianta se o deste campo for mais alto (numérico para texto)
     const next = measuredBefore(key);
     if (next > m.inset + 1) startGuess(next, key, m.inset);
+    // a folha desceu antes de o aparelho avisar que o teclado saiu, e ele voltou do mesmo
+    // tamanho: não virá medida nova, então vale a que está aí
+    else if (!open) publish(m.height, m.top, true);
     return;
   }
   if (!gesture) return;

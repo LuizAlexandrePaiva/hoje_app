@@ -36,6 +36,8 @@ function dateBox(input) {
     const filled = isValidISO(input.value);
     text.textContent = filled ? formatDayMonth(input.value, yearOf(todayISO())) : input.dataset.empty || 'Escolher';
     text.classList.toggle('empty', !filled);
+    // data pela metade (um trecho apagado): os dígitos precisam aparecer, não "Sem data"
+    if (input.validity?.badInput) box.classList.add('typed');
     if (box.isConnected) fitText(box); // data de outro ano em meia coluna: a letra encolhe em vez de cortar
   };
   input.addEventListener('input', sync);
@@ -872,7 +874,7 @@ export function invoiceSheet(key, { scroll, focus } = {}) {
     invoiceSheet(key, { scroll: document.querySelector('.sheet')?.scrollTop, focus: '.switch input' });
   });
 
-  const row = (it) => h('li', {}, h('button', { class: 'list-item', onclick: () => invoiceItemSheet(key, it) },
+  const row = (it) => h('li', { 'data-item': it.id }, h('button', { class: 'list-item', onclick: () => invoiceItemSheet(key, it) },
     h('span', { class: 'li-main' },
       h('span', { class: `li-title ${it.name ? '' : 'muted'}` }, it.name || 'Gasto'),
       it.date && h('span', { class: 'li-sub' }, formatDayMonth(it.date, ref))),
@@ -906,31 +908,43 @@ export function invoiceSheet(key, { scroll, focus } = {}) {
     paid && !paid.skipped && h('p', { class: 'field-hint' }, 'Para desfazer o pagamento, exclua a movimentação em Contas.'),
   ]);
   const panel = document.querySelector('.sheet');
-  if (scroll === 'add') centerInSheet(panel.querySelector('[data-add]'));
-  else if (scroll != null) panel.scrollTop = scroll;
+  // de volta de um gasto: ele fica à vista (a lista é ordenada por data, então pode
+  // estar longe do botão); se sumiu, vale o botão de adicionar
+  if (scroll && typeof scroll === 'object') {
+    const saved = [...panel.querySelectorAll('[data-item]')].find((li) => li.dataset.item === scroll.item);
+    centerInSheet(saved || panel.querySelector('[data-add]'));
+  } else if (scroll != null) panel.scrollTop = scroll;
   // a folha é refeita a cada troca: devolve o foco ao controle usado (ou ao mês, se ele sumiu)
   if (focus) (panel.querySelector(focus) || panel.querySelector('.month-nav .li-title'))?.focus({ preventScroll: true });
 }
 
 /**
- * Um gasto da fatura: nome, valor e dia da compra (opcional; gasto novo sugere hoje).
+ * Um gasto da fatura: nome, valor e dia da compra (opcional). Gasto novo sugere
+ * hoje, menos em fatura já paga, pulada ou vencida, onde a compra não pode ser de hoje.
  * Em gasto novo dá para salvar e já lançar o próximo, que herda a data do anterior.
+ * Fechar esta folha (X, toque fora, Esc, voltar) devolve à fatura.
  */
 function invoiceItemSheet(key, item) {
   const state = store.getState();
+  const today = todayISO();
   const p = parseInvoiceKey(key);
   const exp = state.expenses.find((e) => e.id === p.expenseId);
+  const occ = occurrenceByKey(state, key);
+  const past = !!state.settled[key] || (occ ? occ.date < today : false);
   const isNew = !item;
-  let added = 0;
+  /** Onde a fatura estava rolada, para voltar ao mesmo lugar quando nada foi salvo. */
+  const from = document.querySelector('.sheet')?.scrollTop ?? 0;
+  /** O último gasto salvo aqui: é ele que a fatura mostra na volta. */
+  let last = null;
   const value = moneyInput(item?.amount ?? null);
-  const date = dateInput(isNew ? todayISO() : item.date || '', { min: ITEM_DATE_MIN, max: ITEM_DATE_MAX, 'data-empty': 'Sem data' });
+  const date = dateInput(isNew ? (past ? '' : today) : item.date || '', { min: ITEM_DATE_MIN, max: ITEM_DATE_MAX, 'data-empty': 'Sem data' });
   const name = textInput(item?.name, {
     placeholder: 'Ex.: Mercado, Assinatura', maxlength: store.NAME_MAX, enterkeyhint: 'next', ...waitForTap(isNew),
     onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); focusField(value); } },
   });
   const lead = h('p', { class: 'sheet-lead', 'aria-live': 'polite' }, `${exp?.name ?? 'Cartão'}, ${formatMonth(p.month)}.`);
   const err = errorBox();
-  const back = (scroll) => invoiceSheet(key, { scroll });
+  const back = (scroll = last ? { item: last.id } : from) => invoiceSheet(key, { scroll });
   /** Salva o que está no formulário; devolve o gasto, false (campo inválido) ou null (fatura sumiu). */
   const save = () => {
     const v = parseBRL(value.value);
@@ -946,10 +960,10 @@ function invoiceItemSheet(key, item) {
   };
   const isEmpty = () => !name.value.trim() && !value.value.trim();
   const again = () => {
-    if (added && isEmpty()) return focusField(name); // toque repetido: nada a salvar
+    if (last && isEmpty()) return focusField(name); // toque repetido: nada a salvar
     const saved = save();
     if (!saved) return;
-    added++;
+    last = saved;
     const sum = occurrenceByKey(store.getState(), key)?.invoice.sum ?? 0;
     lead.textContent = `Lançado. Os gastos somam ${formatBRL(sum)}.`; // curto: cabe em uma linha e o formulário não se mexe
     err.textContent = '';
@@ -959,8 +973,9 @@ function invoiceItemSheet(key, item) {
   };
   sheet(isNew ? 'Novo gasto' : 'Editar gasto', () => form(() => {
     // depois de "Salvar e novo", salvar com o formulário vazio só volta para a fatura
-    if (added && isEmpty()) return back('add');
-    if (save()) back(isNew ? 'add' : undefined);
+    if (last && isEmpty()) return back();
+    const saved = save();
+    if (saved) back({ item: saved.id });
   },
   lead,
   field('Nome', name),
@@ -975,19 +990,20 @@ function invoiceItemSheet(key, item) {
         onclick: () => {
           let gone;
           try { gone = store.removeInvoiceItem(key, item.id); } catch (e) { return invoiceGone(e); }
-          back();
+          back(from);
           if (!gone) return;
           toast('Gasto removido', {
             label: 'Desfazer',
             run: () => {
+              let restored;
               try {
-                store.addInvoiceItem(key, gone.item, gone.index);
+                restored = store.addInvoiceItem(key, gone.item, gone.index);
                 if (gone.closed) store.setInvoiceClosed(key, true);
               } catch (e) { return invoiceGone(e); }
-              back();
+              back({ item: restored.id });
             },
           });
         },
       }, icon('trash', { size: 20 }), 'Excluir'),
-    h('button', { type: 'submit', class: 'btn primary' }, 'Salvar'))));
+    h('button', { type: 'submit', class: 'btn primary' }, 'Salvar'))), { onDismiss: () => back() });
 }

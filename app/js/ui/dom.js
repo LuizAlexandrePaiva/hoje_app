@@ -52,12 +52,25 @@ export function amount(text, cls = '', attrs = {}) {
 
 const FIT_MIN_PX = 12;
 
+/**
+ * O texto passa da largura? scrollWidth arredonda para pixel inteiro, e onde a
+ * sobra vira reticências qualquer fração já corta o fim do texto ("8 de nov de
+ * 20…"); nesse caso a medida é feita com fração de pixel.
+ */
+function overflows(el) {
+  if (el.scrollWidth > el.clientWidth + 1) return true;
+  if (getComputedStyle(el).textOverflow !== 'ellipsis') return false;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.01;
+}
+
 /** Reduz a fonte dos elementos [data-fit] até o texto caber na largura. */
 export function fitText(root = document) {
   for (const el of root.querySelectorAll('[data-fit]')) {
     el.style.fontSize = '';
     let size = parseFloat(getComputedStyle(el).fontSize);
-    while (el.scrollWidth > el.clientWidth + 1 && size > FIT_MIN_PX) {
+    while (size > FIT_MIN_PX && overflows(el)) {
       size -= 1;
       el.style.fontSize = `${size}px`;
     }
@@ -146,7 +159,7 @@ document.addEventListener('keydown', (e) => {
   const panel = openSheet.panel;
   if (e.key === 'Escape') {
     e.preventDefault();
-    closeSheet();
+    dismissSheet();
   } else if (e.key === 'Tab') {
     const items = focusables(panel);
     const quiet = { preventScroll: true }; // quem mostra o campo é reveal(), sem mover a página
@@ -190,8 +203,10 @@ function lockPage(on) {
  * Abre uma folha modal. `build(close)` devolve o conteúdo.
  * Fecha ao tocar fora, com Esc ou no botão voltar do Android (via histórico).
  * O foco entra na folha e volta para quem a abriu ao fechar.
+ * `onDismiss` troca o que esses caminhos (e o X) fazem: a folha aberta de dentro
+ * de outra volta para ela em vez de fechar tudo. `close` continua fechando.
  */
-export function sheet(title, build, { onClose } = {}) {
+export function sheet(title, build, { onClose, onDismiss } = {}) {
   document.querySelector('.toast')?.remove();
   // Trocar de folha reaproveita a entrada de histórico já criada
   const previous = openSheet;
@@ -210,14 +225,14 @@ export function sheet(title, build, { onClose } = {}) {
   const panel = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId, tabindex: '-1' },
     h('div', { class: 'sheet-head' },
       h('h2', { id: titleId }, title),
-      h('button', { class: 'icon-btn', 'aria-label': 'Fechar', onclick: close }, icon('close'))),
+      h('button', { class: 'icon-btn', 'aria-label': 'Fechar', onclick: dismissSheet }, icon('close'))),
     h('div', { class: 'sheet-body' }, build(close)));
   // Tocar fora fecha, mas só quando o toque começou e terminou no fundo: ao focar
   // um campo a folha sobe, e o fim desse mesmo toque cairia no fundo.
   let pressedOutside = false;
   backdrop.addEventListener('pointerdown', (e) => { pressedOutside = e.target === backdrop; });
   backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop && pressedOutside) close();
+    if (e.target === backdrop && pressedOutside) dismissSheet();
     pressedOutside = false;
     // campo que já tinha o foco, com o teclado recolhido: o toque traz o teclado de volta sem evento de foco
     if (e.target === document.activeElement) expectKeyboard(e.target);
@@ -258,10 +273,16 @@ export function sheet(title, build, { onClose } = {}) {
   let onPop = previous?.onPop;
   if (!onPop) {
     history.pushState({ sheet: true }, '');
-    onPop = () => closeSheet(true);
+    // A entrada de histórico é herdada por quem troca de folha, então o destino do
+    // "voltar" é lido na hora. Ela já foi gasta: a folha que reabrir cria a sua.
+    onPop = () => {
+      const reopen = openSheet?.onDismiss;
+      closeSheet(true);
+      reopen?.();
+    };
     window.addEventListener('popstate', onPop, { once: true });
   }
-  openSheet = { backdrop, panel, onPop, onClose, returnFocus, scrollY };
+  openSheet = { backdrop, panel, onPop, onClose, onDismiss, returnFocus, scrollY };
   fitText(panel);
   // O foco é decidido já, dentro do toque que abriu a folha, e uma vez só. Campo de
   // digitar: no iPhone o teclado só sobe com foco feito durante o toque (ou se já
@@ -275,6 +296,12 @@ export function sheet(title, build, { onClose } = {}) {
     keyboardLeft();
   }
   requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+/** X, toque fora e Esc: volta para a folha de onde esta veio, ou fecha. */
+function dismissSheet() {
+  if (openSheet?.onDismiss) openSheet.onDismiss();
+  else closeSheet();
 }
 
 export function closeSheet(fromPop = false) {

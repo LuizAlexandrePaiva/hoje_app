@@ -64,6 +64,10 @@ body { min-height: 100dvh; -webkit-tap-highlight-color: transparent; overscroll-
 /* Folha aberta: a página atrás não rola. Vai na raiz, porque `overflow-x: clip`
    em html (lá embaixo) faz o navegador ignorar o overflow de body. */
 html.no-scroll { overflow-y: hidden; }
+/* computador com barra de rolagem fixa: a faixa reservada a ela escurece junto com o resto */
+@media (hover: hover) and (pointer: fine) {
+  html.no-scroll { background-color: color-mix(in srgb, #000 64%, var(--bg)); }
+}
 [hidden] { display: none !important; }
 h1, h2, h3, h4, p { margin: 0; }
 button { font: inherit; color: inherit; }
@@ -213,6 +217,8 @@ body.no-tabbar .main { padding-bottom: calc(var(--safe-b) + 16px); }
 }
 .icon-btn:active { background: var(--surface-2); }
 :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+/* a folha recebe o foco só para o teclado e o leitor de tela começarem nela: sem contorno */
+.sheet:focus-visible { outline: none; }
 
 /* ---------- listas ---------- */
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -252,8 +258,10 @@ input, select {
 input[type="date"], input[type="month"] {
   -webkit-appearance: none; appearance: none; display: block; text-align: left; line-height: 1.2;
 }
-/* o texto nativo da data não quebra linha (no iPhone ele quebraria e o campo cresceria) */
-input::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.2em; white-space: nowrap; overflow: hidden; }
+/* O texto nativo da data não quebra linha (no iPhone ele quebraria e o campo cresceria).
+   Sem `overflow: hidden` aqui: "dezembro de 2026" passa alguns pixels da coluna do
+   mês, e cortado perderia o último dígito do ano; o que sobra usa a margem interna do campo. */
+input::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.2em; white-space: nowrap; }
 /* Data no telefone: vale o texto do app ("8 de nov"), por cima do campo nativo.
    O do iPhone é longo demais para meia coluna e some quando o campo está vazio. */
 .date { position: relative; display: flex; min-width: 0; }
@@ -261,6 +269,8 @@ input::-webkit-date-and-time-value { text-align: left; margin: 0; min-height: 1.
 @media (pointer: coarse) {
   .date input { color: transparent; -webkit-text-fill-color: transparent; }
   .date input::-webkit-calendar-picker-indicator { opacity: 0; }
+  /* onde a data tem trechos editáveis, o realce do trecho em foco apareceria atrás do texto */
+  .date:not(.typed) input::-webkit-datetime-edit { opacity: 0; }
   .date .date-text {
     display: block; position: absolute; left: 15px; right: 15px; top: 50%; transform: translateY(-50%);
     pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -594,7 +604,7 @@ html, body, .main { overflow-x: clip; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
+  *, *::before, *::after { transition: none !important; }
 }
 
 /* utilidades de tom ficam no fim: assim ganham de .li-sub, .stat-label e afins */
